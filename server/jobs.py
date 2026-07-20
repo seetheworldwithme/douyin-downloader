@@ -187,6 +187,17 @@ class JobManager:
         async with self._lock:
             return list(self._jobs.values())
 
+    async def clear(self) -> int:
+        """清空所有 job 记录,返回被清除的数量。
+
+        in-flight(pending/running)任务的 asyncio.Task 不被取消——它会在后台
+        跑完并落盘,只是其结果不再被追踪。这对于「清除历史」是预期行为。
+        """
+        async with self._lock:
+            count = len(self._jobs)
+            self._jobs.clear()
+        return count
+
     async def shutdown(self) -> None:
         """等待所有 pending/running 任务结束。"""
         tasks = [j._task for j in self._jobs.values() if j._task is not None]

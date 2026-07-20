@@ -22,6 +22,11 @@ const content = ref({
 })
 
 // 从「分享文案」里提取真实链接：优先抓 http(s) 链接，再兜底抓不带协议的抖音短链
+// 提取后做归一化(去尾斜杠)再去重,避免同一链接因尾斜杠差异被当成两条
+function normalizeUrl(u) {
+  return u.replace(/[.,，。!！?？]+$/, '').replace(/\/+$/, '')
+}
+
 function extractUrls(text) {
   if (!text) return []
   const found = new Set()
@@ -29,12 +34,12 @@ function extractUrls(text) {
   const urlRe = /https?:\/\/[^\s，。、,）)】]+/g
   let m
   while ((m = urlRe.exec(text)) !== null) {
-    found.add(m[0].replace(/[.,，。!！?？]+$/, ''))
+    found.add(normalizeUrl(m[0]))
   }
   // 2) 兜底：不带协议的 v.douyin.com/xxxxx 裸短链
   const shortRe = /\bv\.douyin\.com\/[A-Za-z0-9_-]+/g
   while ((m = shortRe.exec(text)) !== null) {
-    found.add('https://' + m[0])
+    found.add(normalizeUrl('https://' + m[0]))
   }
   return Array.from(found)
 }

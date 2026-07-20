@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { listJobs } from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { listJobs, clearJobs } from '../api'
 
 const jobs = ref([])
 const loading = ref(false)
@@ -107,6 +108,31 @@ function manualRefresh() {
   refresh()
 }
 
+const clearing = ref(false)
+
+async function handleClear() {
+  if (sortedJobs.value.length === 0) return
+  try {
+    await ElMessageBox.confirm('确定要清空所有下载记录吗?(不影响已下载到磁盘的文件)', '清除历史', {
+      confirmButtonText: '清除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch (_e) {
+    return // 用户取消
+  }
+  clearing.value = true
+  try {
+    const { cleared } = await clearJobs()
+    ElMessage.success(`已清除 ${cleared} 条记录`)
+    await refresh()
+  } catch (e) {
+    ElMessage.error(`清除失败:${e.message || '未知错误'}`)
+  } finally {
+    clearing.value = false
+  }
+}
+
 defineExpose({ refresh })
 
 onMounted(() => {
@@ -126,6 +152,15 @@ onBeforeUnmount(() => {
         <div class="header-actions">
           <span class="status-line" v-if="hasActive">⏳ 正在轮询…</span>
           <el-button text :loading="loading" @click="manualRefresh">刷新</el-button>
+          <el-button
+            type="danger"
+            text
+            :loading="clearing"
+            :disabled="sortedJobs.length === 0"
+            @click="handleClear"
+          >
+            清除历史
+          </el-button>
         </div>
       </div>
     </template>

@@ -243,6 +243,11 @@ def build_app(config: ConfigLoader) -> FastAPI:
         jobs = await manager.list_jobs()
         return {"jobs": [j.to_dict() for j in jobs]}
 
+    @app.delete("/api/v1/jobs")
+    async def clear_jobs() -> Dict[str, int]:
+        cleared = await manager.clear()
+        return {"cleared": cleared}
+
     # 开发期:Vite dev server(默认 5173)跨域访问后端;生产同源时这条规则无害
     app.add_middleware(
         CORSMiddleware,

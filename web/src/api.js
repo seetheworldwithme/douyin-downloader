@@ -43,6 +43,11 @@ export function listJobs() {
   return request('/jobs')
 }
 
+// 清空所有任务记录 -> { cleared: N }
+export function clearJobs() {
+  return request('/jobs', { method: 'DELETE' })
+}
+
 // 查询单个任务
 export function getJob(jobId) {
   return request(`/jobs/${jobId}`)

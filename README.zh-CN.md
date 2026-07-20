@@ -341,6 +341,46 @@ python run.py --serve --serve-port 8000
 完成态的 job 会按 TTL（默认 24 小时）+ 最大数量（默认 500）自动剪裁；in-flight 的 job 永不被裁掉。
 可通过 `server.max_jobs` / `server.job_ttl_seconds` 调整。
 
+### Web 控制台（Vue 前端）
+
+项目自带一个基于 Vue 3 + Element Plus 的 Web 控制台，提供图形化的链接提交、批量下载和任务实时状态展示。前端构建产物由后端 FastAPI 一并托管，无需额外部署。
+
+**开发模式**（前后端分离联调，两个终端）：
+
+```bash
+# 终端 A：启动后端
+pip install fastapi uvicorn          # 一次性可选依赖
+python run.py --serve --serve-port 8000
+
+# 终端 B：启动前端开发服务器（Vite，默认 5173，自动代理 /api 到 8000）
+cd web
+npm install
+npm run dev
+# 浏览器打开 http://localhost:5173
+```
+
+**生产模式**（单端口同时托管页面与 API）：
+
+```bash
+cd web
+npm install && npm run build         # 产物输出到 server/static/
+cd ..
+python run.py --serve --serve-port 8000
+# 浏览器打开 http://127.0.0.1:8000
+```
+
+功能：
+
+- **智能链接提取**：可直接粘贴抖音 App「分享→复制」的整段文案，自动用正则提取其中的真实链接并批量提交、去重，忽略描述文字。
+- **可选保存目录**：提交区有「保存目录」输入框，默认 `Video/douyin`（仅作用于 web，不影响 CLI）；清空则回落到后端配置的 `path`。下载在后端执行，故此处为路径文本而非系统目录选择器。
+- **实时进度与网速**：任务列表为每个任务显示当前下载文件的字节进度条、瞬时网速、已下载/总字节数、作品计数（N/M）。移动端自动切换为卡片式布局。
+- **下载目录展示**：顶栏显示默认/当前保存目录，手机端同样可见。
+- 后端健康检查指示灯。
+
+> 说明：直播录制（`live` 类型）使用独立的字节循环，其任务暂不显示字节进度条（会降级为只显示作品计数与终态）；视频/图文/音乐/封面/直播回放均支持字节级进度。
+
+> 共享逻辑同步：本次为支持字节进度，对 `storage/file_manager.py`（`download_file`/`_persist_stream` 增加可选 `progress_callback`）与 `core/downloader_base.py`（`ProgressReporter` 协议增加可选 `update_bytes`）做了**增量、向后兼容**的改动（默认 `None`，CLI 不受影响）。这两个文件为与桌面仓库 `douyin-downloader-desktop` 的共享逻辑，需同步过去。
+
 ### 完成后发送通知
 
 ```yaml

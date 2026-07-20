@@ -41,6 +41,10 @@ class ProgressReporter(Protocol):
 
     def advance_item(self, status: str, detail: str = "") -> None: ...
 
+    def update_bytes(
+        self, downloaded: int, total: Optional[int], filename: str = ""
+    ) -> None: ...
+
 
 class DownloadResult:
     def __init__(self):
@@ -121,6 +125,25 @@ class BaseDownloader(ABC):
             self.progress_reporter.advance_item(status, detail)
         except Exception as exc:
             logger.debug("Progress advance_item failed: %s", exc)
+
+    def _progress_update_bytes(
+        self, downloaded: int, total: Optional[int], filename: str = ""
+    ) -> None:
+        """Surface byte-level progress for the file currently being downloaded.
+
+        Wired into :meth:`_download_with_retry` via a ``progress_callback``
+        handed to :meth:`FileManager.download_file`. Reporters that don't
+        implement ``update_bytes`` (e.g. the CLI Rich display) silently skip it.
+        """
+        if not self.progress_reporter:
+            return
+        fn = getattr(self.progress_reporter, "update_bytes", None)
+        if not callable(fn):
+            return
+        try:
+            fn(downloaded, total, filename)
+        except Exception as exc:
+            logger.debug("Progress update_bytes failed: %s", exc)
 
     def _progress_report_author(
         self,
@@ -690,6 +713,9 @@ class BaseDownloader(ABC):
         retry: bool = True,
     ) -> bool | Path:
         async def _task():
+            def _byte_cb(written: int, expected: Optional[int]) -> None:
+                self._progress_update_bytes(written, expected, save_path.name)
+
             download_result = await self.file_manager.download_file(
                 url,
                 save_path,
@@ -698,6 +724,7 @@ class BaseDownloader(ABC):
                 proxy=getattr(self.api_client, "proxy", None),
                 prefer_response_content_type=prefer_response_content_type,
                 return_saved_path=return_saved_path,
+                progress_callback=_byte_cb,
             )
             if not download_result:
                 raise RuntimeError(f"Download failed for {url}")

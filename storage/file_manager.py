@@ -1,7 +1,7 @@
 import os
 import re
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Callable, Dict, Optional, Union
 
 import aiofiles
 import aiohttp
@@ -197,6 +197,7 @@ class FileManager:
         *,
         prefer_response_content_type: bool = False,
         return_saved_path: bool = False,
+        progress_callback: Optional[Callable[[int, Optional[int]], None]] = None,
     ) -> Union[bool, Path]:
         should_close = False
         if session is None:
@@ -226,6 +227,7 @@ class FileManager:
                         response.headers,
                         prefer_response_content_type=prefer_response_content_type,
                         return_saved_path=return_saved_path,
+                        progress_callback=progress_callback,
                     )
                 if response.status == 206:
                     expected_size = self._complete_content_range_size(response.headers)
@@ -243,6 +245,7 @@ class FileManager:
                         response.headers,
                         prefer_response_content_type=prefer_response_content_type,
                         return_saved_path=return_saved_path,
+                        progress_callback=progress_callback,
                     )
                 status = response.status
                 logger.debug("Download failed for %s, status=%s", final_path.name, status)
@@ -257,6 +260,7 @@ class FileManager:
                     proxy=proxy,
                     prefer_response_content_type=prefer_response_content_type,
                     return_saved_path=return_saved_path,
+                    progress_callback=progress_callback,
                 )
             return False
         except Exception as e:
@@ -291,11 +295,14 @@ class FileManager:
         *,
         prefer_response_content_type: bool = False,
         return_saved_path: bool = False,
+        progress_callback: Optional[Callable[[int, Optional[int]], None]] = None,
     ) -> Union[bool, Path]:
         """Stream ``chunk_iter`` to a temp file and atomically rename it.
 
         Shared by the aiohttp and httpx download paths so the content-type
         resolution, size-mismatch guard, and atomic rename stay identical.
+        ``progress_callback(written, expected_size)`` (if given) is invoked after
+        each chunk to surface byte-level download progress.
         """
         final_path = self._resolve_save_path_from_content_type(
             save_path,
@@ -308,6 +315,8 @@ class FileManager:
             async for chunk in chunk_iter:
                 await f.write(chunk)
                 written += len(chunk)
+                if progress_callback is not None:
+                    progress_callback(written, expected_size)
         if expected_size is not None and written != expected_size:
             logger.warning(
                 "Size mismatch for %s: expected %d, got %d",
@@ -329,6 +338,7 @@ class FileManager:
         proxy: Optional[str] = None,
         prefer_response_content_type: bool = False,
         return_saved_path: bool = False,
+        progress_callback: Optional[Callable[[int, Optional[int]], None]] = None,
     ) -> Union[bool, Path]:
         """Download an asset via httpx, whose TLS fingerprint the Douyin image
         CDN accepts when aiohttp's is rejected (403). Mirrors aiohttp's
@@ -361,6 +371,7 @@ class FileManager:
                         response.headers,
                         prefer_response_content_type=prefer_response_content_type,
                         return_saved_path=return_saved_path,
+                        progress_callback=progress_callback,
                     )
         except Exception as e:
             logger.debug("httpx fallback error for %s: %s", save_path.name, e)

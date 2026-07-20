@@ -27,9 +27,19 @@ class JobStatus:
 
 
 class DownloadJob:
-    def __init__(self, job_id: str, url: str):
+    def __init__(
+        self,
+        job_id: str,
+        url: str,
+        save_dir: Optional[str] = None,
+        content: Optional[Dict[str, bool]] = None,
+    ):
         self.job_id = job_id
         self.url = url
+        self.save_dir: Optional[str] = save_dir
+        # 按请求覆盖的内容类型开关（仅 music/cover/avatar/json 这类可选附件，
+        # 视频 mp4 本体始终下载）。None 表示沿用 config 默认。
+        self.content: Dict[str, bool] = dict(content) if content else {}
         self.status = JobStatus.PENDING
         self.created_at = _now_iso()
         self.started_at: Optional[str] = None
@@ -41,12 +51,21 @@ class DownloadJob:
         self.failed = 0
         self.skipped = 0
         self.error: Optional[str] = None
+        # 实时进度（由 ServerProgressReporter 在下载过程中写入）
+        self.item_total = 0
+        self.item_done = 0
+        self.current_step: Optional[str] = None
+        self.current_file: Optional[str] = None
+        self.downloaded_bytes = 0
+        self.total_bytes: Optional[int] = None
+        self.speed_bps = 0
         self._task: Optional[asyncio.Task] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "job_id": self.job_id,
             "url": self.url,
+            "save_dir": self.save_dir,
             "status": self.status,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -56,6 +75,13 @@ class DownloadJob:
             "failed": self.failed,
             "skipped": self.skipped,
             "error": self.error,
+            "item_total": self.item_total,
+            "item_done": self.item_done,
+            "current_step": self.current_step,
+            "current_file": self.current_file,
+            "downloaded_bytes": self.downloaded_bytes,
+            "total_bytes": self.total_bytes,
+            "speed_bps": self.speed_bps,
         }
 
 
@@ -77,7 +103,7 @@ class JobManager:
 
     def __init__(
         self,
-        executor: Callable[[str], Awaitable[Dict[str, int]]],
+        executor: Callable[["DownloadJob"], Awaitable[Dict[str, int]]],
         *,
         max_concurrency: int = 2,
         max_jobs: int = DEFAULT_MAX_JOBS,
@@ -90,9 +116,14 @@ class JobManager:
         self.max_jobs = max(1, int(max_jobs))
         self.job_ttl_seconds = max(0.0, float(job_ttl_seconds))
 
-    async def submit(self, url: str) -> DownloadJob:
+    async def submit(
+        self,
+        url: str,
+        save_dir: Optional[str] = None,
+        content: Optional[Dict[str, bool]] = None,
+    ) -> DownloadJob:
         job_id = uuid.uuid4().hex[:12]
-        job = DownloadJob(job_id=job_id, url=url)
+        job = DownloadJob(job_id=job_id, url=url, save_dir=save_dir, content=content)
         async with self._lock:
             self._prune_locked()
             self._jobs[job_id] = job
@@ -134,7 +165,7 @@ class JobManager:
             job.status = JobStatus.RUNNING
             job.started_at = _now_iso()
             try:
-                counts = await self.executor(job.url)
+                counts = await self.executor(job)
                 job.total = int(counts.get("total", 0))
                 job.success = int(counts.get("success", 0))
                 job.failed = int(counts.get("failed", 0))

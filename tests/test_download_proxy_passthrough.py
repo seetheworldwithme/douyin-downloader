@@ -73,7 +73,13 @@ def _run_execute_download(monkeypatch, tmp_path, config_updates: Dict[str, Any])
     )
 
     asyncio.run(
-        _execute_download("https://www.douyin.com/video/7000000000000000001", deps)
+        _execute_download(
+            server_app.DownloadJob(
+                job_id="t",
+                url="https://www.douyin.com/video/7000000000000000001",
+            ),
+            deps,
+        )
     )
     return _RecordingAPIClient.seen_proxies
 

@@ -51,3 +51,8 @@ config/cookies.json
 .vscode/
 .omc/
 .gstack/
+
+# Frontend (web/) build artifacts and deps
+web/node_modules/
+web/dist/
+server/static/

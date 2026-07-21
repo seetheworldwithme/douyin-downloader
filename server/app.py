@@ -1,260 +1,368 @@
 """FastAPI REST 服务入口。
 
-HTTP 层薄封装：
-- 接收 URL，创建 job，返回 job_id
-- 实际下载委托给 cli.main.download_url 的简化复用
+HTTP 层(流式下载到本地,服务器不落盘):
+- ``POST /api/v1/login``   校验用户名密码,签发 HMAC token
+- ``POST /api/v1/resolve`` 解析视频链接,返回标题/文件名(供前端预览确认)
+- ``GET  /api/v1/stream``  流式透传无水印 mp4 给浏览器,触发原生另存为
 
-fastapi/uvicorn 是**可选**依赖。若未安装，导入本模块会 ImportError。
+视频字节流由服务器从抖音 CDN 中转给浏览器(防盗链决定了浏览器无法直连),
+但**不写入服务器磁盘**。
+
+fastapi/uvicorn 是**可选**依赖。若未安装,导入本模块会 ImportError。
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 import pathlib
-from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional
+import secrets
+import time
+from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException
+from urllib.parse import quote
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from auth import CookieManager
 from config import ConfigLoader
-from control import QueueManager, RateLimiter, RetryHandler
-from core import DouyinAPIClient, DownloaderFactory, URLParser
-from server.jobs import DownloadJob, JobManager
-from server.progress import ServerProgressReporter
-from storage import FileManager
+from core import DouyinAPIClient, LoginRequiredError, URLParser
+from core.video_downloader import VideoDownloader
 from utils.logger import setup_logger
-from utils.validators import is_short_url, normalize_short_url
+from utils.validators import is_short_url, normalize_short_url, sanitize_filename
 
 logger = setup_logger("REST")
 
-# web 前端的默认保存目录（仅作用于 web，不影响 CLI 全局默认）
-WEB_DEFAULT_SAVE_DIR = "Video/douyin"
-
-# 允许按请求覆盖的内容类型开关。视频 mp4 本体不在其中——它是核心产物，始终下载。
-_OVERRIDABLE_CONTENT_KEYS = ("music", "cover", "avatar", "json")
+_TOKEN_TTL_SECONDS = 7 * 24 * 3600  # 个人用途,token 有效期 7 天
+_DEFAULT_USERNAME = "xuziyue"
+_DEFAULT_PASSWORD = "mmjsxu666555"
 
 
-class _RequestConfig:
-    """按请求覆盖若干内容类型开关的 config 视图。
-
-    下载链路对 config 只调用 ``.get(key)``（见 core/），所以只需转发 get，
-    其余属性通过 ``__getattr__`` 回落到基础 ConfigLoader。
-    """
-
-    def __init__(self, base: ConfigLoader, overrides: Dict[str, bool]):
-        self._base = base
-        self._overrides = overrides
-
-    def get(self, key: str, default: Any = None) -> Any:
-        if key in self._overrides:
-            return self._overrides[key]
-        return self._base.get(key, default)
-
-    def __getattr__(self, name: str) -> Any:
-        # 只在 _base 已设置后触发；交由基础 ConfigLoader 提供其余能力。
-        return getattr(self._base, name)
+# --------------------------------------------------------------------------- #
+# 认证:零依赖 HMAC 签名 token(类 JWT,HS256)
+# --------------------------------------------------------------------------- #
+def _b64(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
-class DownloadRequest(BaseModel):
+def _unb64(s: str) -> bytes:
+    pad = "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode(s + pad)
+
+
+def issue_token(username: str, secret: str) -> str:
+    header = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    now = int(time.time())
+    payload = _b64(
+        json.dumps(
+            {"sub": username, "iat": now, "exp": now + _TOKEN_TTL_SECONDS},
+            separators=(",", ":"),
+        ).encode()
+    )
+    signing_input = f"{header}.{payload}".encode()
+    sig = hmac.new(secret.encode(), signing_input, hashlib.sha256).digest()
+    return f"{header}.{payload}.{_b64(sig)}"
+
+
+def verify_token(token: str, secret: str) -> Optional[dict]:
+    try:
+        header_b64, payload_b64, sig_b64 = token.split(".")
+    except (ValueError, AttributeError):
+        return None
+    signing_input = f"{header_b64}.{payload_b64}".encode()
+    expected = hmac.new(secret.encode(), signing_input, hashlib.sha256).digest()
+    try:
+        actual = _unb64(sig_b64)
+    except Exception:
+        return None
+    if not hmac.compare_digest(expected, actual):
+        return None
+    try:
+        payload = json.loads(_unb64(payload_b64))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    exp = payload.get("exp")
+    if not isinstance(exp, int) or exp < int(time.time()):
+        return None
+    return payload
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class ResolveRequest(BaseModel):
     url: str
-    save_dir: Optional[str] = None
-    # 可选附件内容类型开关；未提供（None）的字段沿用 config 默认
-    content: Optional[Dict[str, bool]] = None
 
 
-class JobResponse(BaseModel):
-    job_id: str
-    status: str
-    url: str
-
-
+# --------------------------------------------------------------------------- #
+# 跨请求复用的依赖
+# --------------------------------------------------------------------------- #
 class _ServerDeps:
-    """跨请求复用的重量级依赖。
-
-    REST 服务在进程生命周期内只需要一份 FileManager / RateLimiter / RetryHandler /
-    QueueManager / CookieManager；每个请求重新构造既浪费又会触发文件系统 mkdir。
-    DouyinAPIClient 由于持有 aiohttp.ClientSession，依旧按请求创建，避免跨请求泄漏
-    连接状态或触发 "Session is closed" 错误。
-    """
+    """流式模式下进程级共享依赖:config + cookie_manager + 认证凭据。"""
 
     def __init__(self, config: ConfigLoader):
         self.config = config
-        # Resolve the cookie file path relative to the config file's directory
-        # so the sidecar can find it regardless of its working directory (which
-        # on macOS is often '/' when launched by Electron).
+        # cookie 文件相对 config 解析,便于 sidecar 在任意工作目录找到它
         if config.config_path:
-            from pathlib import Path
-
-            cookie_file = str(Path(config.config_path).resolve().parent / ".cookies.json")
+            cookie_file = str(
+                pathlib.Path(config.config_path).resolve().parent / ".cookies.json"
+            )
         else:
             cookie_file = ".cookies.json"
         self.cookie_manager = CookieManager(cookie_file=cookie_file)
-        # Load cookies from the config (env var / YAML cookie key) first, then
-        # fall back to whatever is already on disk in the cookie file. This
-        # ensures that cookies saved by a previous session are picked up on
-        # restart even when the config doesn't embed them inline.
         initial_cookies = config.get_cookies()
         if initial_cookies:
             self.cookie_manager.set_cookies(initial_cookies)
         else:
-            # Trigger a load from disk so get_cookies() returns the persisted
-            # session without requiring a fresh login on every app restart.
+            # 触发从磁盘加载,使重启后仍持有上次保存的会话
             self.cookie_manager.get_cookies()
-        self.file_manager = FileManager(config.get("path"))
-        self.rate_limiter = RateLimiter(max_per_second=float(config.get("rate_limit", 2) or 2))
-        self.retry_handler = RetryHandler(max_retries=int(config.get("retry_times", 3) or 3))
-        self.queue_manager = QueueManager(max_workers=int(config.get("thread", 5) or 5))
+
+        # 认证凭据从 config 读;secret 留空则启动时生成临时密钥(重启后 token 失效)
+        auth_cfg = config.get("auth") or {}
+        if not isinstance(auth_cfg, dict):
+            auth_cfg = {}
+        self.auth_username = str(auth_cfg.get("username") or _DEFAULT_USERNAME)
+        self.auth_password = str(auth_cfg.get("password") or _DEFAULT_PASSWORD)
+        secret = str(auth_cfg.get("secret") or "").strip()
+        if not secret:
+            secret = secrets.token_urlsafe(32)
+            logger.warning("auth.secret 未配置,使用临时密钥(重启后所有 token 失效)")
+        self.auth_secret = secret
 
 
-async def _execute_download(job: DownloadJob, deps: "_ServerDeps") -> Dict[str, int]:
-    """简化版 download_url：执行并把成功/失败计数返回给 job。
+def _get_deps(request: Request) -> _ServerDeps:
+    return request.app.state.deps
 
-    有意不复用 cli.main.download_url —— 后者绑定了 progress_display 的 rich 状态。
-    API client 仍按请求创建（aiohttp session 不跨请求复用）；其余重量级依赖从
-    _ServerDeps 共享。
 
-    每请求按 ``job.save_dir``（或 config 默认）构造一个 FileManager，使前端可
-    指定保存目录；构造一个 ServerProgressReporter 把进度实时写回 job。
+def require_user(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = Query(None),
+) -> str:
+    """校验 token。
+
+    同时支持两种传输:``Authorization: Bearer``(普通 fetch)和 ``?token=``
+    (浏览器导航触发的 GET 下载带不了 header)。任一有效即放行。
     """
-    # 解析本次实际保存目录：优先用前端传入的 save_dir，否则回落 config.path
-    save_dir = job.save_dir or deps.config.get("path")
-    job.save_dir = save_dir  # 回填实际值供前端展示
-    # FileManager 构造成本可接受（仅 mkdir，exist_ok=True）；按请求构造以支持
-    # 前端自定义目录。_ServerDeps 里那份共享实例仅作为没有 save_dir 时的 fallback。
-    file_manager = FileManager(save_dir) if save_dir else deps.file_manager
-    reporter = ServerProgressReporter(job)
-    # 按请求覆盖内容类型开关（白名单过滤，避免前端塞入无关键）
-    overrides = {
-        k: bool(v)
-        for k, v in job.content.items()
-        if k in _OVERRIDABLE_CONTENT_KEYS
-    }
-    config = _RequestConfig(deps.config, overrides) if overrides else deps.config
-    url = job.url
+    deps = _get_deps(request)
+    raw = None
+    if authorization and authorization.lower().startswith("bearer "):
+        raw = authorization[7:].strip()
+    elif token:
+        raw = token
+    if not raw:
+        raise HTTPException(status_code=401, detail="未登录")
+    payload = verify_token(raw, deps.auth_secret)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="登录已过期,请重新登录")
+    return payload.get("sub") or ""
 
-    # proxy 与 cli.main.download_url 对齐:API 请求、短链解析和 CDN 媒体
-    # 下载(downloader_base 读 api_client.proxy)统一走配置代理。
-    async with DouyinAPIClient(
+
+# --------------------------------------------------------------------------- #
+# 共享解析:resolve 与 stream 复用
+# --------------------------------------------------------------------------- #
+async def _resolve_video(url: str, deps: _ServerDeps) -> Dict[str, Any]:
+    """短链 → 类型校验 → 详情 → 无水印直链 + 文件名。
+
+    手动管理 ``api_client`` 生命周期(**不用 async with**):StreamingResponse
+    会惰性消费响应体,若在此处用 ``async with`` 会在端点返回时关闭 session,
+    导致流式下载读到已关闭的连接。调用方负责在合适时机 ``close()``。
+
+    所有可预判失败均在此以 ``HTTPException`` 抛出(一旦返回 StreamingResponse,
+    状态码即锁定 200,无法再改)。
+    """
+    api_client = DouyinAPIClient(
         deps.cookie_manager.get_cookies(),
         proxy=deps.config.get("proxy"),
-    ) as api_client:
+    )
+    await api_client._ensure_session()
+    try:
         if is_short_url(url):
             resolved = await api_client.resolve_short_url(normalize_short_url(url))
             if not resolved:
-                raise RuntimeError(f"Failed to resolve short URL: {url}")
+                raise HTTPException(status_code=400, detail="短链解析失败")
             url = resolved
 
         parsed = URLParser.parse(url)
         if not parsed:
-            raise RuntimeError(f"Unsupported URL: {url}")
+            raise HTTPException(status_code=400, detail="无法识别的抖音链接")
+        if parsed.get("type") != "video":
+            raise HTTPException(
+                status_code=400,
+                detail=f"仅支持视频(/video/)链接,当前类型: {parsed.get('type')}",
+            )
+        aweme_id = parsed.get("aweme_id")
+        if not aweme_id:
+            raise HTTPException(status_code=400, detail="未能从链接提取视频 ID")
 
-        downloader = DownloaderFactory.create(
-            parsed["type"],
-            config,
-            api_client,
-            file_manager,
-            deps.cookie_manager,
-            None,  # database 不在 server 场景里启用，避免单例冲突
-            deps.rate_limiter,
-            deps.retry_handler,
-            deps.queue_manager,
-            progress_reporter=reporter,
+        try:
+            aweme_data = await api_client.get_video_detail(aweme_id)
+        except LoginRequiredError:
+            raise HTTPException(
+                status_code=401,
+                detail="抖音 Cookie 已过期,请更新 config.yml 中的 cookies",
+            )
+        if not aweme_data:
+            raise HTTPException(
+                status_code=502,
+                detail="获取视频详情失败(Cookie 可能过期或被风控)",
+            )
+
+        # 复用 VideoDownloader 的无水印直链选择 + X-Bogus 签名逻辑(纯方法,不碰盘)。
+        # 调用其私有方法是可接受的折中:把它改成公开 API 会触及共享 core,需同步桌面端;
+        # 此处保持零侵入。file_manager=None 安全,因为该方法不使用它。
+        downloader = VideoDownloader(
+            config=deps.config,
+            api_client=api_client,
+            file_manager=None,
+            cookie_manager=deps.cookie_manager,
         )
-        if downloader is None:
-            raise RuntimeError(f"No downloader for url_type={parsed['type']}")
+        video_info = downloader._build_no_watermark_url(aweme_data)
+        if not video_info:
+            raise HTTPException(status_code=404, detail="未找到可播放的视频地址")
+        video_url, video_headers = video_info
 
-        result = await downloader.download(parsed)
+        title = (aweme_data.get("desc") or "").strip() or str(aweme_id)
+        filename = f"{sanitize_filename(title, max_length=80)}.mp4"
+
         return {
-            "total": result.total,
-            "success": result.success,
-            "failed": result.failed,
-            "skipped": result.skipped,
+            "api_client": api_client,
+            "video_url": video_url,
+            "video_headers": video_headers,
+            "filename": filename,
+            "aweme_id": aweme_id,
+            "title": title,
         }
+    except HTTPException:
+        await api_client.close()
+        raise
+    except Exception as exc:
+        await api_client.close()
+        logger.exception("resolve_video failed")
+        raise HTTPException(status_code=500, detail=f"内部错误: {exc}")
 
 
+# --------------------------------------------------------------------------- #
+# 应用构建
+# --------------------------------------------------------------------------- #
 def build_app(config: ConfigLoader) -> FastAPI:
     deps = _ServerDeps(config)
 
-    async def executor(job: DownloadJob) -> Dict[str, int]:
-        return await _execute_download(job, deps)
-
-    server_cfg = config.get("server") or {}
-    if not isinstance(server_cfg, dict):
-        server_cfg = {}
-    manager = JobManager(
-        executor=executor,
-        max_concurrency=int(config.get("thread", 2) or 2),
-        max_jobs=int(server_cfg.get("max_jobs") or JobManager.DEFAULT_MAX_JOBS),
-        job_ttl_seconds=float(
-            server_cfg.get("job_ttl_seconds") or JobManager.DEFAULT_JOB_TTL_SECONDS
-        ),
-    )
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        yield
-        await manager.shutdown()
-
     app = FastAPI(
         title="Douyin Downloader API",
-        version="1.0",
-        description="REST API for dispatching Douyin download jobs.",
-        lifespan=lifespan,
+        version="2.0",
+        description="Stream Douyin videos to the browser (no server-side storage).",
     )
-    app.state.job_manager = manager
     app.state.deps = deps
 
     @app.get("/api/v1/health")
     async def health() -> Dict[str, str]:
         return {"status": "ok"}
 
-    @app.post("/api/v1/download", response_model=JobResponse)
-    async def create_job(req: DownloadRequest) -> JobResponse:
+    @app.post("/api/v1/login")
+    async def login(req: LoginRequest) -> Dict[str, str]:
+        ok = hmac.compare_digest(req.username or "", deps.auth_username) and hmac.compare_digest(
+            req.password or "", deps.auth_password
+        )
+        if not ok:
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        return {"token": issue_token(req.username, deps.auth_secret)}
+
+    @app.post("/api/v1/resolve")
+    async def resolve(
+        req: ResolveRequest, _user: str = Depends(require_user)
+    ) -> Dict[str, str]:
         if not req.url:
             raise HTTPException(status_code=400, detail="url is required")
-        job = await manager.submit(
-            req.url,
-            save_dir=(req.save_dir or None),
-            content=(req.content or None),
+        info = await _resolve_video(req.url, deps)
+        try:
+            return {
+                "title": info["title"],
+                "filename": info["filename"],
+                "aweme_id": info["aweme_id"],
+            }
+        finally:
+            await info["api_client"].close()
+
+    @app.get("/api/v1/stream")
+    async def stream(
+        url: str = Query(..., description="Douyin video URL or short link"),
+        _user: str = Depends(require_user),
+    ) -> StreamingResponse:
+        info = await _resolve_video(url, deps)
+        api_client = info["api_client"]
+        video_url = info["video_url"]
+        video_headers = info["video_headers"]
+        filename = info["filename"]
+
+        try:
+            session = await api_client.get_session()
+            # proxy 与 _request_json / _download_with_retry 对齐:per-request 传
+            upstream = await session.get(
+                video_url,
+                headers=video_headers,
+                proxy=api_client.proxy or None,
+            )
+            if upstream.status != 200:
+                body = ""
+                try:
+                    body = (await upstream.text())[:200]
+                except Exception:
+                    pass
+                upstream.release()
+                raise HTTPException(
+                    status_code=502, detail=f"上游返回 {upstream.status}: {body}"
+                )
+
+            # 中文文件名双编码(RFC 5987):ASCII 回退 + filename*
+            encoded = quote(filename)
+            ascii_fallback = (
+                filename.encode("ascii", "ignore").decode("ascii").replace('"', "").strip()
+                or "video.mp4"
+            )
+            content_disposition = (
+                f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
+            )
+            upstream_ct = upstream.headers.get("Content-Type", "video/mp4")
+            upstream_cl = upstream.headers.get("Content-Length")
+            response_headers = {"Content-Disposition": content_disposition}
+            if upstream_cl:
+                response_headers["Content-Length"] = upstream_cl
+        except HTTPException:
+            await api_client.close()
+            raise
+
+        # 生成器持有 upstream + api_client 生命周期:正常完成 / 客户端中途断开 /
+        # 异常,三种情况都会进入 finally 释放上游并关闭 api_client。
+        async def generate():
+            try:
+                async for chunk in upstream.content.iter_chunked(256 * 1024):
+                    yield chunk
+            finally:
+                try:
+                    upstream.release()
+                except Exception:
+                    pass
+                await api_client.close()
+
+        return StreamingResponse(
+            generate(), media_type=upstream_ct, headers=response_headers
         )
-        return JobResponse(job_id=job.job_id, status=job.status, url=job.url)
-
-    @app.get("/api/v1/defaults")
-    async def defaults() -> Dict[str, str]:
-        """返回 web 前端默认/当前保存目录，供 UI 预填与展示。"""
-        return {
-            "default_path": WEB_DEFAULT_SAVE_DIR,
-            "current_path": config.get("path") or "",
-        }
-
-    @app.get("/api/v1/jobs/{job_id}")
-    async def get_job(job_id: str) -> Dict[str, Any]:
-        job = await manager.get(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="job not found")
-        return job.to_dict()
-
-    @app.get("/api/v1/jobs")
-    async def list_jobs() -> Dict[str, List[Dict[str, Any]]]:
-        jobs = await manager.list_jobs()
-        return {"jobs": [j.to_dict() for j in jobs]}
-
-    @app.delete("/api/v1/jobs")
-    async def clear_jobs() -> Dict[str, int]:
-        cleared = await manager.clear()
-        return {"cleared": cleared}
 
     # 开发期:Vite dev server(默认 5173)跨域访问后端;生产同源时这条规则无害
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-        ],
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -265,13 +373,14 @@ def build_app(config: ConfigLoader) -> FastAPI:
     if index_html.exists():
         assets_dir = static_dir / "assets"
         if assets_dir.exists():
-            app.mount(
-                "/assets", StaticFiles(directory=str(assets_dir)), name="assets"
-            )
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
         @app.get("/", include_in_schema=False)
         async def root() -> FileResponse:
-            return FileResponse(str(index_html))
+            return FileResponse(
+                str(index_html),
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+            )
 
         # SPA 兜底:非 /api 路径一律回退到 index.html
         @app.get("/{path:path}", include_in_schema=False)
@@ -279,7 +388,10 @@ def build_app(config: ConfigLoader) -> FastAPI:
             candidate = static_dir / path
             if path and candidate.is_file():
                 return FileResponse(str(candidate))
-            return FileResponse(str(index_html))
+            return FileResponse(
+                str(index_html),
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+            )
     else:
         logger.info(
             "前端未构建(server/static/index.html 不存在),仅运行 API。"

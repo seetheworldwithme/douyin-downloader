@@ -1,14 +1,11 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { getHealth, getDefaults } from './api'
+import { getHealth, getToken, clearToken } from './api'
+import LoginCard from './components/LoginCard.vue'
 import SubmitCard from './components/SubmitCard.vue'
-import JobTable from './components/JobTable.vue'
 
-// 后端健康状态:unknown / online / offline
-const health = ref('unknown')
-const defaultPath = ref('') // web 默认保存目录(Video/douyin)
-const currentPath = ref('') // 后端 config 实际保存目录
-const jobTableRef = ref(null)
+const loggedIn = ref(!!getToken())
+const health = ref('unknown') // unknown / online / offline
 let healthTimer = null
 
 async function checkHealth() {
@@ -20,29 +17,26 @@ async function checkHealth() {
   }
 }
 
-async function loadDefaults() {
-  try {
-    const d = await getDefaults()
-    defaultPath.value = d.default_path || ''
-    currentPath.value = d.current_path || ''
-  } catch (_e) {
-    /* 忽略 */
-  }
+function onLoggedIn() {
+  loggedIn.value = true
 }
-
-function onSubmitted() {
-  // 提交后立即刷新一次任务列表
-  jobTableRef.value?.refresh()
+function logout() {
+  clearToken()
+  loggedIn.value = false
+}
+// token 过期(api.js 在 401 时派发)→ 自动退回登录页
+function onAuthExpired() {
+  loggedIn.value = false
 }
 
 onMounted(() => {
   checkHealth()
-  loadDefaults()
   healthTimer = setInterval(checkHealth, 5000)
+  window.addEventListener('dd-auth-expired', onAuthExpired)
 })
-
 onBeforeUnmount(() => {
   if (healthTimer) clearInterval(healthTimer)
+  window.removeEventListener('dd-auth-expired', onAuthExpired)
 })
 </script>
 
@@ -51,29 +45,23 @@ onBeforeUnmount(() => {
     <header class="app-header">
       <div class="title">
         <span class="logo">🎬</span>
-        <span>抖音下载器 · 控制台</span>
+        <span>抖音下载器</span>
       </div>
       <div class="header-right">
-        <span class="path-info" :title="`默认 ${defaultPath} / 当前 ${currentPath}`">
-          📂 <span class="path-label">默认:</span>{{ defaultPath || '—' }}
-        </span>
         <span class="health">
           <span class="dot" :class="health" />
           <span class="health-text">
             {{ health === 'online' ? '在线' : health === 'offline' ? '离线' : '检测中…' }}
           </span>
         </span>
+        <el-button v-if="loggedIn" text @click="logout">登出</el-button>
       </div>
     </header>
 
     <main class="app-main">
-      <SubmitCard @submitted="onSubmitted" />
-      <JobTable ref="jobTableRef" />
+      <LoginCard v-if="!loggedIn" @logged-in="onLoggedIn" />
+      <SubmitCard v-else />
     </main>
-
-    <footer class="app-footer">
-      <span>提交链接后任务在后台异步执行,列表会自动轮询刷新状态。</span>
-    </footer>
   </div>
 </template>
 
@@ -119,33 +107,6 @@ body {
   align-items: center;
   gap: 16px;
 }
-.path-info {
-  font-size: 13px;
-  color: #606266;
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.path-label {
-  color: #909399;
-  margin-right: 2px;
-}
-@media (max-width: 600px) {
-  .app-header {
-    padding: 0 12px;
-  }
-  .title {
-    font-size: 15px;
-  }
-  .header-right {
-    gap: 8px;
-  }
-  .path-info {
-    font-size: 11px;
-    max-width: 130px;
-  }
-}
 .health {
   display: flex;
   align-items: center;
@@ -170,7 +131,7 @@ body {
 }
 .app-main {
   flex: 1;
-  max-width: 980px;
+  max-width: 760px;
   width: 100%;
   margin: 0 auto;
   padding: 24px;
@@ -178,10 +139,15 @@ body {
   flex-direction: column;
   gap: 24px;
 }
-.app-footer {
-  text-align: center;
-  font-size: 12px;
-  color: #909399;
-  padding: 12px;
+@media (max-width: 600px) {
+  .app-header {
+    padding: 0 12px;
+  }
+  .title {
+    font-size: 15px;
+  }
+  .header-right {
+    gap: 8px;
+  }
 }
 </style>

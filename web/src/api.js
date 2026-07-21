@@ -1,18 +1,38 @@
 // 统一走相对路径:开发时由 Vite 代理 /api -> :8000,生产时与 FastAPI 同源
 const BASE = '/api/v1'
+const TOKEN_KEY = 'dd_token'
+// token 过期时通知 App 退回登录页(自定义事件)
+const AUTH_EXPIRED_EVENT = 'dd-auth-expired'
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY) || ''
+}
+
+export function setToken(token) {
+  localStorage.setItem(TOKEN_KEY, token)
+}
+
+export function clearToken() {
+  localStorage.removeItem(TOKEN_KEY)
+}
 
 async function request(path, options = {}) {
-  const resp = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  })
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) }
+  const token = getToken()
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const resp = await fetch(`${BASE}${path}`, { ...options, headers })
+  if (resp.status === 401) {
+    clearToken()
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+    throw new Error('登录已过期,请重新登录')
+  }
   if (!resp.ok) {
     let detail = `${resp.status} ${resp.statusText}`
     try {
       const body = await resp.json()
       if (body && body.detail) detail = body.detail
     } catch (_e) {
-      /* 忽略非 JSON 错误体 */
+      /* 非 JSON 错误体 */
     }
     throw new Error(detail)
   }
@@ -21,39 +41,32 @@ async function request(path, options = {}) {
   return text ? JSON.parse(text) : null
 }
 
-// 提交单个下载任务 -> { job_id, status, url }
-// content: { music, cover, avatar, json } 可选附件开关;视频 mp4 本体始终下载
-export function submitDownload(url, saveDir, content) {
-  const body = { url }
-  if (saveDir && saveDir.trim()) body.save_dir = saveDir.trim()
-  if (content && typeof content === 'object') body.content = content
-  return request('/download', {
+// 登录 -> { token }(成功后写入 localStorage,后续请求自动携带)
+export async function login(username, password) {
+  const data = await request('/login', {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: JSON.stringify({ username, password }),
+  })
+  if (data && data.token) setToken(data.token)
+  return data
+}
+
+// 健康检查(公开) -> { status: 'ok' }
+export function getHealth() {
+  return request('/health')
+}
+
+// 解析视频链接(预览) -> { title, filename, aweme_id }
+export function resolveVideo(url) {
+  return request('/resolve', {
+    method: 'POST',
+    body: JSON.stringify({ url }),
   })
 }
 
-// 默认/当前保存目录 -> { default_path, current_path }
-export function getDefaults() {
-  return request('/defaults')
-}
-
-// 列出所有任务 -> { jobs: [...] }
-export function listJobs() {
-  return request('/jobs')
-}
-
-// 清空所有任务记录 -> { cleared: N }
-export function clearJobs() {
-  return request('/jobs', { method: 'DELETE' })
-}
-
-// 查询单个任务
-export function getJob(jobId) {
-  return request(`/jobs/${jobId}`)
-}
-
-// 健康检查 -> { status: 'ok' }
-export function getHealth() {
-  return request('/health')
+// 构造流式下载 URL,供浏览器原生导航下载(<a> 点击触发另存为)。
+// 导航 GET 无法携带 Authorization header,所以 token 走 query 参数。
+export function streamUrl(url) {
+  const params = new URLSearchParams({ url, token: getToken() })
+  return `${BASE}/stream?${params.toString()}`
 }

@@ -1,85 +1,66 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { ElMessage } from 'element-plus'
-import { submitDownload } from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { resolveVideo, streamUrl } from '../api'
 
-const emit = defineEmits(['submitted'])
+const raw = ref('')
+const busy = ref(false)
 
-const rawText = ref('')
-// web 前端默认保存目录（与后端 /api/v1/defaults 的 default_path 保持一致）
-const DEFAULT_SAVE_DIR = 'Video/douyin'
-const saveDir = ref(DEFAULT_SAVE_DIR)
-const submitting = ref(false)
-
-// 内容类型开关。视频(mp4)是核心产物,始终下载,用 disabled 勾选框表示;
-// 其余附件默认不勾——只有勾选的才下载。
-const content = ref({
-  video: true, // 锁定:视频本体,始终下载(仅作展示,不发给后端)
-  music: false,
-  cover: false,
-  avatar: false,
-  json: false,
-})
-
-// 从「分享文案」里提取真实链接：优先抓 http(s) 链接，再兜底抓不带协议的抖音短链
-// 提取后做归一化(去尾斜杠)再去重,避免同一链接因尾斜杠差异被当成两条
+// 粘贴的可能是整段分享文案(含文案 + 短链 + 尾部乱码),从中提取第一个抖音链接
 function normalizeUrl(u) {
   return u.replace(/[.,，。!！?？]+$/, '').replace(/\/+$/, '')
 }
-
-function extractUrls(text) {
-  if (!text) return []
-  const found = new Set()
-  // 1) 带协议的链接（覆盖 https://v.douyin.com/xxx、www.douyin.com/video/xxx 等）
-  const urlRe = /https?:\/\/[^\s，。、,）)】]+/g
-  let m
-  while ((m = urlRe.exec(text)) !== null) {
-    found.add(normalizeUrl(m[0]))
-  }
-  // 2) 兜底：不带协议的 v.douyin.com/xxxxx 裸短链
-  const shortRe = /\bv\.douyin\.com\/[A-Za-z0-9_-]+/g
-  while ((m = shortRe.exec(text)) !== null) {
-    found.add(normalizeUrl('https://' + m[0]))
-  }
-  return Array.from(found)
+function extractUrl(text) {
+  if (!text) return ''
+  // 1) 带协议的链接(覆盖 https://v.douyin.com/xxx、www.douyin.com/video/xxx 等)
+  const m = /https?:\/\/[^\s，。、,）)】]+/.exec(text)
+  if (m) return normalizeUrl(m[0])
+  // 2) 兜底:不带协议的裸短链 v.douyin.com/xxxxx
+  const s = /\bv\.douyin\.com\/[A-Za-z0-9_-]+/.exec(text)
+  if (s) return normalizeUrl('https://' + s[0])
+  return ''
 }
 
-const urls = computed(() => extractUrls(rawText.value))
+const url = computed(() => extractUrl(raw.value.trim()))
+const isValid = computed(() => !!url.value)
 
-async function handleSubmit() {
-  if (urls.value.length === 0) {
-    ElMessage.warning('没有识别到有效的抖音链接')
+async function handleDownload() {
+  if (!url.value) {
+    ElMessage.warning('没有识别到抖音链接,请粘贴视频链接或分享文案')
     return
   }
-  submitting.value = true
-  const dir = saveDir.value
-  // 只把附件开关发给后端(video 本体始终下载,无需发送)
-  const payload = {
-    music: !!content.value.music,
-    cover: !!content.value.cover,
-    avatar: !!content.value.avatar,
-    json: !!content.value.json,
-  }
-  const results = await Promise.allSettled(
-    urls.value.map((url) => submitDownload(url, dir, payload))
-  )
 
-  const ok = results.filter((r) => r.status === 'fulfilled').length
-  const fail = results.length - ok
-  if (ok > 0) {
-    ElMessage.success(`已提交 ${ok} 个任务`)
-  }
-  if (fail > 0) {
-    const firstErr = results.find((r) => r.status === 'rejected')
-    const msg = firstErr?.reason?.message || '未知错误'
-    ElMessage.error(`${fail} 个提交失败:${msg}`)
+  busy.value = true
+  // 1) 先解析预览(失败在这里友好提示,不会触发浏览器跳错误页)
+  let info
+  try {
+    info = await resolveVideo(url.value)
+  } catch (e) {
+    ElMessage.error(e.message || '解析失败')
+    busy.value = false
+    return
   }
 
-  submitting.value = false
-  if (ok > 0) {
-    rawText.value = ''
-    emit('submitted')
-  }
+  // 2) 确认框 -> 触发浏览器原生另存为(浏览器流式直写本地,不经 JS 内存)
+  ElMessageBox.confirm(`标题:${info.title}\n文件名:${info.filename}`, '确认下载该视频?', {
+    confirmButtonText: '下载',
+    cancelButtonText: '取消',
+    type: 'info',
+  })
+    .then(() => {
+      const a = document.createElement('a')
+      a.href = streamUrl(url.value)
+      a.download = '' // 让服务器 Content-Disposition 决定文件名
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    })
+    .catch(() => {
+      /* 用户取消 */
+    })
+    .finally(() => {
+      busy.value = false
+    })
 }
 </script>
 
@@ -87,52 +68,26 @@ async function handleSubmit() {
   <el-card shadow="never" class="submit-card">
     <template #header>
       <div class="card-header">
-        <span>提交下载</span>
-        <span class="hint">支持粘贴整段抖音分享文案,自动提取链接、批量提交、自动去重</span>
+        <span>下载视频</span>
+        <span class="hint">仅支持单个抖音视频(/video/);粘贴分享文案会自动提取链接</span>
       </div>
     </template>
 
     <el-input
-      v-model="rawText"
+      v-model="raw"
       type="textarea"
-      :rows="4"
-      placeholder="粘贴抖音链接或整段分享文案,例如:9.99 复制打开抖音 https://v.douyin.com/xxxxx/"
+      :rows="3"
+      placeholder="粘贴抖音视频链接,或整段分享文案(例如:1.53 复制打开抖音……https://v.douyin.com/xxxxx/)"
       resize="vertical"
     />
 
-    <div class="save-dir">
-      <span class="dir-label">保存目录</span>
-      <el-input
-        v-model="saveDir"
-        size="default"
-        placeholder="留空则使用后端默认 ./Downloaded/"
-        clearable
-      />
-      <el-button text @click="saveDir = DEFAULT_SAVE_DIR">重置默认</el-button>
-    </div>
-
-    <div class="content-types">
-      <span class="dir-label">下载内容</span>
-      <div class="checks">
-        <el-checkbox v-model="content.video" disabled>视频(mp4)必选</el-checkbox>
-        <el-checkbox v-model="content.music">音乐(mp3)</el-checkbox>
-        <el-checkbox v-model="content.cover">封面</el-checkbox>
-        <el-checkbox v-model="content.avatar">头像</el-checkbox>
-        <el-checkbox v-model="content.json">元数据</el-checkbox>
-      </div>
-      <span class="hint2">仅勾选的内容会被下载,默认只下载视频</span>
+    <div class="extracted" v-if="url">
+      <span class="label">识别到链接:</span><code>{{ url }}</code>
     </div>
 
     <div class="actions">
-      <span class="count" v-if="urls.length">识别到 {{ urls.length }} 个链接</span>
-      <span class="count" v-else>未识别到链接</span>
-      <el-button
-        type="primary"
-        :loading="submitting"
-        :disabled="urls.length === 0"
-        @click="handleSubmit"
-      >
-        提交下载
+      <el-button type="primary" :loading="busy" :disabled="!isValid" @click="handleDownload">
+        下载视频
       </el-button>
     </div>
   </el-card>
@@ -151,50 +106,23 @@ async function handleSubmit() {
   color: #909399;
   font-weight: normal;
 }
-.save-dir {
-  margin-top: 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.dir-label {
+.extracted {
+  margin-top: 10px;
   font-size: 13px;
   color: #606266;
-  white-space: nowrap;
+  word-break: break-all;
 }
-.save-dir :deep(.el-input) {
-  flex: 1;
-}
-.content-types {
-  margin-top: 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.checks {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-.hint2 {
-  font-size: 12px;
+.extracted .label {
   color: #909399;
+  margin-right: 4px;
+}
+.extracted code {
+  background: #f4f4f5;
+  padding: 1px 6px;
+  border-radius: 3px;
 }
 .actions {
-  margin-top: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.count {
-  font-size: 13px;
-  color: #606266;
-}
-@media (max-width: 600px) {
-  .save-dir {
-    flex-wrap: wrap;
-  }
+  margin-top: 14px;
+  text-align: right;
 }
 </style>

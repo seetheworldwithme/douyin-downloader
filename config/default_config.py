@@ -107,4 +107,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "max_jobs": 500,  # 内存中保留的 job 条数上限（不含 in-flight）
         "job_ttl_seconds": 86400,  # 完成态 job 保留时间（秒）
     },
+    # Web 控制台登录凭据（仅 web / sidecar 的 serve 模式生效）。
+    "auth": {
+        "username": "xuziyue",
+        "password": "mmjsxu666555",
+        # HMAC 签名密钥。留空会在启动时生成临时密钥（重启后所有 token 失效）。
+        # 生产建议填随机字符串：python -c "import secrets;print(secrets.token_urlsafe(32))"
+        "secret": "",
+    },
 }

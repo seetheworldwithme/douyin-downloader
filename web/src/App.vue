@@ -1,8 +1,21 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { getHealth, getToken, clearToken } from './api'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { Capacitor } from '@capacitor/core'
+import { getHealth, getToken, clearToken, getServerBase } from './api'
 import LoginCard from './components/LoginCard.vue'
 import SubmitCard from './components/SubmitCard.vue'
+import SettingsCard from './components/SettingsCard.vue'
+
+// 是否跑在 Capacitor 安卓壳里。网页(同源部署)serverBase 留空即正确,
+// 无需强制配置;只有 APP(跨域)首启才必须先填地址。
+const isNative = Capacitor.isNativePlatform()
+
+// 服务器地址。localStorage 非响应式,这里用 ref 镜像,SettingsCard 保存时
+// 通过 @saved 回写,驱动 mustConfigure 计算。
+const serverBase = ref(getServerBase())
+const showSettings = ref(false)
+// 仅在 APP 里未配地址时强制显示设置;网页同源时空地址就是正确状态。
+const mustConfigure = computed(() => isNative && !serverBase.value)
 
 const loggedIn = ref(!!getToken())
 const health = ref('unknown') // unknown / online / offline
@@ -27,6 +40,13 @@ function logout() {
 // token 过期(api.js 在 401 时派发)→ 自动退回登录页
 function onAuthExpired() {
   loggedIn.value = false
+}
+
+function onSettingsSaved(base) {
+  serverBase.value = base
+  // 配置成功后自动收起设置面板(留空时保持展开,提示用户继续配置)
+  if (base) showSettings.value = false
+  checkHealth()
 }
 
 onMounted(() => {
@@ -54,13 +74,18 @@ onBeforeUnmount(() => {
             {{ health === 'online' ? '在线' : health === 'offline' ? '离线' : '检测中…' }}
           </span>
         </span>
+        <el-button text @click="showSettings = !showSettings">设置</el-button>
         <el-button v-if="loggedIn" text @click="logout">登出</el-button>
       </div>
     </header>
 
     <main class="app-main">
-      <LoginCard v-if="!loggedIn" @logged-in="onLoggedIn" />
-      <SubmitCard v-else />
+      <!-- APP 首启未配地址时强制设置;网页同源时直接进登录 -->
+      <SettingsCard v-if="mustConfigure || showSettings" @saved="onSettingsSaved" />
+      <template v-else>
+        <LoginCard v-if="!loggedIn" @logged-in="onLoggedIn" />
+        <SubmitCard v-else />
+      </template>
     </main>
   </div>
 </template>

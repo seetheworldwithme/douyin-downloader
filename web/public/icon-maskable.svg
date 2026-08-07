@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4ed69a"/>
+      <stop offset="100%" stop-color="#2c8f6a"/>
+    </linearGradient>
+  </defs>
+  <!-- maskable:背景全出血(无圆角),glyph 缩到中心安全区(~72%) -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <g fill="#ffffff" transform="translate(256 264) scale(0.72) translate(-256 -256)">
+    <path d="M256 96 L336 176 L288 176 L288 288 L224 288 L224 176 L176 176 Z"/>
+    <path d="M152 320 L360 320 L360 360 Q360 392 328 392 L184 392 Q152 392 152 360 Z"/>
+  </g>
+</svg>

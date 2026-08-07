@@ -15,11 +15,13 @@ from config import ConfigLoader
 from server.app import build_app, issue_token
 
 
-def _make_app(tmp_path, *, auth=None):
+def _make_app(tmp_path, *, auth=None, server=None):
     config = ConfigLoader(None)
     config.update(path=str(tmp_path))
     if auth:
         config.update(auth=auth)
+    if server:
+        config.update(server=server)
     return build_app(config)
 
 
@@ -100,3 +102,43 @@ def test_deps_generates_ephemeral_secret_when_missing(tmp_path):
     assert app.state.deps.auth_secret  # 临时生成,非空
     assert app.state.deps.auth_username == "u"
     assert app.state.deps.auth_password == "p"
+
+
+def test_cors_allows_capacitor_origin(tmp_path):
+    """默认来源列表应放行 Capacitor WebView origin(https://localhost)。"""
+    app = _make_app(tmp_path)
+    with TestClient(app) as client:
+        resp = client.options(
+            "/api/v1/resolve",
+            headers={
+                "Origin": "https://localhost",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.headers["access-control-allow-origin"] == "https://localhost"
+
+
+def test_cors_config_override_to_wildcard(tmp_path):
+    """server.cors_origins=['*'] 时应全放开(任意 origin 回显 *)。"""
+    app = _make_app(tmp_path, server={"cors_origins": ["*"]})
+    with TestClient(app) as client:
+        resp = client.options(
+            "/api/v1/resolve",
+            headers={
+                "Origin": "https://random.example.com",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.headers["access-control-allow-origin"] == "*"
+
+
+def test_cors_rejects_unknown_origin_by_default(tmp_path):
+    """默认列表不含的 origin 不应回显(非通配模式下严格限制)。"""
+    app = _make_app(tmp_path)
+    with TestClient(app) as client:
+        # 普通请求(非预检)带未授权 Origin:CORS 中间件不拦截响应,但不回显头
+        resp = client.get("/api/v1/health", headers={"Origin": "https://evil.example.com"})
+        assert resp.status_code == 200
+        assert "access-control-allow-origin" not in resp.headers

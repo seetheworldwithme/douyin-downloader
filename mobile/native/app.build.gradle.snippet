@@ -1,0 +1,11 @@
+# —— 加到 web/android/app/build.gradle 的 dependencies { ... } 块里 ——
+# SaveToGalleryPlugin 用 OkHttp 拉取服务端 /stream 流。
+dependencies {
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+}
+
+# —— web/android/variables.gradle:把 minSdkVersion 提到 29(仅用 MediaStore 分区存储路径)——
+# ext {
+#     minSdkVersion = 29
+#     ...
+# }

@@ -1,10 +1,18 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { resolveVideo, streamUrl } from '../api'
+import { Capacitor } from '@capacitor/core'
+import { SaveToGallery } from '../plugins/saveToGallery'
 
 const raw = ref('')
 const busy = ref(false)
+// 原生下载进度(0-100),-1 表示当前不在原生下载中
+const progress = ref(-1)
+
+// 是否运行在 Capacitor 安卓壳里(决定下载路径)
+const isNative = Capacitor.isNativePlatform()
+let progressListener = null
 
 // 粘贴的可能是整段分享文案(含文案 + 短链 + 尾部乱码),从中提取第一个抖音链接
 function normalizeUrl(u) {
@@ -24,6 +32,34 @@ function extractUrl(text) {
 const url = computed(() => extractUrl(raw.value.trim()))
 const isValid = computed(() => !!url.value)
 
+// 浏览器(PWA / PC / 安卓 Chrome):<a download> 触发原生另存为,落下载夹。
+function triggerBrowserDownload() {
+  const a = document.createElement('a')
+  a.href = streamUrl(url.value)
+  a.download = '' // 让服务器 Content-Disposition 决定文件名
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
+
+// 安卓 APP(原生):OkHttp 拉服务端 /stream,写入 MediaStore.Video → 相册可见。
+async function triggerNativeDownload(filename) {
+  progress.value = 0
+  progressListener = await SaveToGallery.addListener('saveProgress', (e) => {
+    progress.value = typeof e.percent === 'number' ? e.percent : progress.value
+  })
+  try {
+    await SaveToGallery.saveToGallery({ url: streamUrl(url.value), filename })
+    ElMessage.success('已保存到相册:Movies/抖音下载器')
+  } finally {
+    if (progressListener) {
+      await progressListener.remove()
+      progressListener = null
+    }
+    progress.value = -1
+  }
+}
+
 async function handleDownload() {
   if (!url.value) {
     ElMessage.warning('没有识别到抖音链接,请粘贴视频链接或分享文案')
@@ -41,27 +77,40 @@ async function handleDownload() {
     return
   }
 
-  // 2) 确认框 -> 触发浏览器原生另存为(浏览器流式直写本地,不经 JS 内存)
-  ElMessageBox.confirm(`标题:${info.title}\n文件名:${info.filename}`, '确认下载该视频?', {
-    confirmButtonText: '下载',
-    cancelButtonText: '取消',
-    type: 'info',
-  })
-    .then(() => {
-      const a = document.createElement('a')
-      a.href = streamUrl(url.value)
-      a.download = '' // 让服务器 Content-Disposition 决定文件名
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-    })
-    .catch(() => {
-      /* 用户取消 */
-    })
-    .finally(() => {
-      busy.value = false
-    })
+  // 2) 确认框 -> 按平台触发下载
+  try {
+    await ElMessageBox.confirm(
+      `标题:${info.title}\n文件名:${info.filename}`,
+      '确认下载该视频?',
+      { confirmButtonText: '下载', cancelButtonText: '取消', type: 'info' },
+    )
+  } catch (_e) {
+    busy.value = false
+    return // 用户取消
+  }
+
+  try {
+    if (isNative) {
+      await triggerNativeDownload(info.filename)
+    } else {
+      triggerBrowserDownload()
+    }
+  } catch (e) {
+    ElMessage.error(e.message || '下载失败')
+  } finally {
+    busy.value = false
+  }
 }
+
+onBeforeUnmount(async () => {
+  if (progressListener) {
+    try {
+      await progressListener.remove()
+    } catch (_e) {
+      /* 忽略 */
+    }
+  }
+})
 </script>
 
 <template>
@@ -69,7 +118,9 @@ async function handleDownload() {
     <template #header>
       <div class="card-header">
         <span>下载视频</span>
-        <span class="hint">仅支持单个抖音视频(/video/);粘贴分享文案会自动提取链接</span>
+        <span class="hint">
+          仅支持单个抖音视频(/video/);{{ isNative ? '保存到相册' : '浏览器另存为' }}
+        </span>
       </div>
     </template>
 
@@ -85,9 +136,19 @@ async function handleDownload() {
       <span class="label">识别到链接:</span><code>{{ url }}</code>
     </div>
 
+    <div v-if="progress >= 0" class="progress">
+      <span class="progress-label">正在保存到相册…{{ progress }}%</span>
+      <el-progress :percentage="progress" :stroke-width="8" :show-text="false" />
+    </div>
+
     <div class="actions">
-      <el-button type="primary" :loading="busy" :disabled="!isValid" @click="handleDownload">
-        下载视频
+      <el-button
+        type="primary"
+        :loading="busy"
+        :disabled="!isValid"
+        @click="handleDownload"
+      >
+        {{ progress >= 0 ? '下载中…' : '下载视频' }}
       </el-button>
     </div>
   </el-card>
@@ -124,5 +185,14 @@ async function handleDownload() {
 .actions {
   margin-top: 14px;
   text-align: right;
+}
+.progress {
+  margin-top: 14px;
+}
+.progress-label {
+  display: block;
+  font-size: 13px;
+  color: #606266;
+  margin-bottom: 6px;
 }
 </style>

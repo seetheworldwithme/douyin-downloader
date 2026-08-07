@@ -42,6 +42,18 @@ _TOKEN_TTL_SECONDS = 7 * 24 * 3600  # 个人用途,token 有效期 7 天
 _DEFAULT_USERNAME = "xuziyue"
 _DEFAULT_PASSWORD = "mmjsxu666555"
 
+# 默认允许的跨域来源:Vite 开发服务器 + Capacitor WebView(androidScheme https
+# 时 origin 为 https://localhost,http 方案与自定义 scheme 也一并覆盖)。
+# 自托管前端或 APK 场景可在 config.yml 的 server.cors_origins 里覆盖/补充,
+# 填 ["*"] 即全放开(个人用途 + token 鉴权 + 不用 cookie,风险可控)。
+_DEFAULT_CORS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://localhost",
+    "http://localhost",
+    "capacitor://localhost",
+]
+
 
 # --------------------------------------------------------------------------- #
 # 认证:零依赖 HMAC 签名 token(类 JWT,HS256)
@@ -137,6 +149,16 @@ class _ServerDeps:
             secret = secrets.token_urlsafe(32)
             logger.warning("auth.secret 未配置,使用临时密钥(重启后所有 token 失效)")
         self.auth_secret = secret
+
+        # 跨域来源:server.cors_origins 覆盖默认列表;支持 ["*"] 全放开。
+        server_cfg = config.get("server") or {}
+        if not isinstance(server_cfg, dict):
+            server_cfg = {}
+        raw_origins = server_cfg.get("cors_origins")
+        if isinstance(raw_origins, list) and raw_origins:
+            self.cors_origins = [str(o) for o in raw_origins]
+        else:
+            self.cors_origins = list(_DEFAULT_CORS)
 
 
 def _get_deps(request: Request) -> _ServerDeps:
@@ -358,10 +380,12 @@ def build_app(config: ConfigLoader) -> FastAPI:
             generate(), media_type=upstream_ct, headers=response_headers
         )
 
-    # 开发期:Vite dev server(默认 5173)跨域访问后端;生产同源时这条规则无害
+    # CORS:开发期 Vite dev server + 生产期 Capacitor WebView / 自托管前端。
+    # origins 来自 config(server.cors_origins),默认含开发 + Capacitor 来源;
+    # 填 ["*"] 时全放开。鉴权走 token(不用 cookie),故不启用 credentials。
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=deps.cors_origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # 从本地经 SSH 部署到服务器(凭据读自仓库根的 .env):
-#   1) 远端 git pull 拉最新代码
+#   1) 远端 git pull(有本地改动则 stash 后再拉,保住改动)
 #   2) scp 同步 config.yml / .cookies.json(gitignored,含密钥)
-#   3) 远端执行 docker/start.sh:构建前端 + 起 conda 后端 + 起 nginx
+#   3) 远端执行 docker/start.sh:构建前端 + 起 conda 后端 + 起前端容器
+#   4) 把 edge-nginx 的 douyin server block 落到 conf.d,nginx -t 校验后 reload
 #
 # 用法:在仓库根执行 `bash docker/deploy.sh`
 set -euo pipefail
@@ -11,59 +12,59 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="$REPO_DIR/.env"
 
-if ! command -v sshpass >/dev/null 2>&1; then
-  echo "缺少 sshpass。macOS: brew install esolitos/ipa/sshpass"; exit 1
-fi
-if [[ ! -f "$ENV_FILE" ]]; then
-  echo "缺少 $ENV_FILE(参考 docker/.env.example)"; exit 1
-fi
+command -v sshpass >/dev/null 2>&1 || { echo "缺少 sshpass。macOS: brew install esolitos/ipa/sshpass"; exit 1; }
+[[ -f "$ENV_FILE" ]] || { echo "缺少 $ENV_FILE(参考 docker/.env.example)"; exit 1; }
 
-# 解析 notes 格式的 .env:  键:值
 get() {
   grep -iE "^${1}:" "$ENV_FILE" | head -1 \
     | sed -E 's/^[^:]+:[[:space:]]*//' | tr -d '\r' | sed 's/[[:space:]]*$//'
 }
 
-IP=$(get ip)
-REMOTE_USER=$(get user)
-PASS=$(get password)
-CODE_DIR=$(get code_dir)
-URL=$(get URL)
-
+IP=$(get ip); REMOTE_USER=$(get user); PASS=$(get password); CODE_DIR=$(get code_dir); URL=$(get URL)
 for v in IP REMOTE_USER PASS CODE_DIR; do
-  if [[ -z "${!v:-}" ]]; then echo ".env 缺少字段:$(echo $v | tr 'A-Z' 'a-z')"; exit 1; fi
+  [[ -n "${!v:-}" ]] || { echo ".env 缺少字段:$(echo $v | tr 'A-Z' 'a-z')"; exit 1; }
 done
 
-echo "→ 目标:${REMOTE_USER}@${IP}:${CODE_DIR}"
-echo "  访问:${URL:-<.env 未设 URL>}"
-SSH_OPTS=(-o StrictHostKeyChecking=accept-new)
+echo "→ 目标:${REMOTE_USER}@${IP}:${CODE_DIR}   访问:${URL:-<未设 URL>}"
+SSH_OPTS=(-o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=accept-new)
 
-echo "== [1/3] 远端 git pull =="
+echo "== [1/4] 远端 git pull =="
 sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${IP}" "
   set -e
-  if [ -d '${CODE_DIR}/.git' ]; then
-    cd '${CODE_DIR}' && git pull --ff-only
+  cd '${CODE_DIR}'
+  if git pull --ff-only; then
+    echo 'pull OK'
   else
-    echo '远端 ${CODE_DIR} 不是 git 仓库。请先在服务器上执行:'
-    echo \"  git clone <repo-url> ${CODE_DIR}\"
-    exit 1
+    echo '有本地改动,先 stash 再 pull(改动保留在 stash)'
+    git stash && git pull --ff-only
   fi
+  echo \"HEAD: \$(git rev-parse --short HEAD)\"
 "
 
-echo "== [2/3] 同步密钥配置 =="
+echo "== [2/4] 同步密钥配置 =="
 for f in config.yml .cookies.json; do
   if [[ -f "$REPO_DIR/$f" ]]; then
     echo "  → $f"
     sshpass -p "$PASS" scp "${SSH_OPTS[@]}" "$REPO_DIR/$f" "${REMOTE_USER}@${IP}:${CODE_DIR}/${f}"
   else
-    echo "  ⚠ 本地无 $f,跳过(后端启动需要 config.yml 与 .cookies.json)"
+    echo "  ⚠ 本地无 $f,跳过(后端需要 config.yml 与 .cookies.json)"
   fi
 done
 
-echo "== [3/3] 远端执行 start.sh =="
-# login shell(-l)让 conda 初始化生效,start.sh 才能激活 dogs 环境
+echo "== [3/4] 远端执行 start.sh =="
 REMOTE_CMD="bash -lc 'cd \"${CODE_DIR}\" && bash docker/start.sh'"
 sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${IP}" "${REMOTE_CMD}"
 
+echo "== [4/4] 配置 edge-nginx 的 douyin server block + reload =="
+sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${IP}" "
+  set -e
+  cp '${CODE_DIR}/docker/edge-proxy/douyin.xuziyue.work.conf' /home/ubuntu/code/edge-proxy/conf.d/
+  echo 'nginx -t 校验(含所有 conf.d,失败则不 reload):'
+  docker exec edge-nginx nginx -t
+  docker exec edge-nginx nginx -s reload
+  echo 'edge-nginx 已 reload'
+"
+
 echo
-echo "✓ 部署完成。访问:${URL:-http://<服务器IP或域名>/}"
+echo "✓ 部署完成。访问:${URL:-http://<服务器域名或IP>/}"
+echo "  健康检查:curl -sk ${URL:-http://<域名>/}api/v1/health"

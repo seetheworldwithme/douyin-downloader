@@ -1,88 +1,80 @@
-# Docker 部署(nginx 镜像 + conda 后端)
+# 部署:edge-nginx + 本地端口容器(参照 calendar-site)
 
-不要 Dockerfile、不打包二进制。`start.sh` 在服务器上把三件事串起来:
+服务器上 `edge-nginx` 容器(host 网络)独占公网 80/443,做 TLS 终结 + 按域名反代到
+各站点的本地端口容器。本服务照此模式:
 
 ```
-npm run build ─→ server/static        前端产物
-conda activate dogs → python run.py --serve  ─→ 127.0.0.1:8000   后端(宿主机)
-docker compose up (官方 nginx) ─→ :80  托管前端 + 反代 /api
+                    edge-nginx(host 网络,80/443,LE 证书)
+                         │  server_name douyin.xuziyue.work
+            ┌────────────┴────────────┐
+   location /                location /api/
+      ↓                          ↓
+ douyin-web 容器            conda dogs 宿主机进程
+ 127.0.0.1:8083 (nginx)     127.0.0.1:8000 (run.py --serve)
+ 纯静态托管 SPA              解析 + 流式中转(不落盘)
 ```
 
-nginx 用 **host 网络**,与宿主机共享网络栈,可直接连 `127.0.0.1:8000`;
-后端只绑 loopback,外网不可达,对外只暴露 80。
+不占 443、不碰 `edge.conf`(只在 `conf.d/` 新增一个文件)、后端只绑 loopback。
 
 ## 文件
 
 | 文件 | 作用 |
 |------|------|
-| `start.sh` | **服务器端**一键启动:构建前端 + 起 conda 后端 + 起 nginx |
-| `deploy.sh` | **本地端**经 SSH(读 `.env`)拉代码 + 同步密钥 + 远端跑 `start.sh` |
-| `docker-compose.yml` | 仅官方 nginx 镜像,host 网络,挂载 `server/static` 与 `nginx.conf` |
-| `nginx.conf` | SPA 兜底 + `/api` 流式反代(禁缓冲、长超时) |
-| `.env.example` | `.env` 模板(SSH/地址配置,勿提交) |
+| `start.sh` | **服务器端**:构建前端 + 起 conda 后端 + 起前端容器 |
+| `deploy.sh` | **本地端**:SSH 拉代码 + 同步密钥 + 跑 start.sh + 落 edge-nginx 配置并 reload |
+| `docker-compose.yml` | 前端官方 nginx 镜像,`127.0.0.1:8083:80`,挂载 `server/static` + `nginx.conf` |
+| `nginx.conf` | 前端容器纯静态 server block(SPA + 缓存,不处理 /api) |
+| `edge-proxy/douyin.xuziyue.work.conf` | **edge-nginx 的 server block**:443 + 证书 + `/`→8083 + `/api/`→8000 |
+| `.env.example` | `.env` 模板(SSH/地址,勿提交) |
 
-## 一、服务器一次性准备(在 `101.33.79.160` 上)
+## 一次性准备(服务器 `101.33.79.160`)
 
-1. **装 Docker**(带 compose 插件)+ 把当前用户加入 docker 组:
-   ```bash
-   sudo apt update && sudo apt install -y docker.io docker-compose-plugin
-   sudo usermod -aG docker $USER   # 之后重新登录生效,免 sudo 跑 docker
-   ```
-2. **装 Node**(构建前端):`sudo apt install -y nodejs npm`(或用 nvm 装 18+ )。
-3. **conda 环境 `dogs`** 装好依赖:
-   ```bash
-   conda create -n dogs python=3.12 -y      # 已存在则跳过
-   conda activate dogs
-   pip install -r requirements.txt fastapi uvicorn
-   ```
-4. **克隆代码**到 `.env` 里的 `code_dir`:
-   ```bash
-   git clone https://github.com/seetheworldwithme/douyin-downloader.git \
-     /home/ubuntu/code/PythonProject/douyin-downloader
-   ```
-5. **放配置**(含密钥,不走 git):把本地 `config.yml`、`.cookies.json` 放到该目录
-   (`deploy.sh` 会自动 scp 同步,首次也可手动放)。
-6. **网络**:`douyin.xuziyue.work` 的 DNS A 记录指向服务器 IP;
-   云厂商**安全组放行 80 端口**(8080/8000 不要对公网开)。
+1. **Docker**(带 compose 插件)+ `sudo usermod -aG docker ubuntu`(重新登录生效)。
+2. **Node**(前端构建用)。
+3. **conda `dogs`** 装依赖:`conda activate dogs && pip install -r requirements.txt fastapi uvicorn`。
+4. **clone 代码**到 `code_dir`;**DNS** `douyin.xuziyue.work` → 服务器 IP;证书已存在
+   (`/etc/letsencrypt/live/douyin.xuziyue.work/`)。
+5. **证书续期切 webroot**(一次性,见下「证书续期」)。
 
-## 二、本地部署(推荐)
+## 部署(本地一条命令)
 
-仓库根的 `.env`(已 gitignore)按 `.env.example` 填好,然后:
+仓库根 `.env` 按模板填好后:
 
 ```bash
 bash docker/deploy.sh
 ```
 
-它会:`git pull` → `scp config.yml .cookies.json` → 远端 `bash docker/start.sh`。
+完成后访问 `https://douyin.xuziyue.work/`。
 
-## 三、或直接在服务器上启动
+## 证书续期(切 webroot,一次性)
+
+`douyin.xuziyue.work` 的 renewal 原为 `authenticator=nginx`,宿主 nginx 停后无法续期。
+edge-nginx 的 80 端口默认 server 已服务 `/.well-known/acme-challenge/`,切到 webroot 即可静默续期:
 
 ```bash
-cd /home/ubuntu/code/PythonProject/douyin-downloader
-bash docker/start.sh
+# 在服务器上(sudo)
+sudo sed -i 's/^authenticator = nginx/authenticator = webroot/' /etc/letsencrypt/renewal/douyin.xuziyue.work.conf
+sudo certbot renew --webroot -w /var/www/certbot --cert-name douyin.xuziyue.work --dry-run
 ```
 
-完成后访问 `http://douyin.xuziyue.work/`。
+dry-run 通过即说明续期链路正常。三个证书都可照此切 webroot。
 
-## 日常操作
+## 日常
 
 ```bash
-# 查看后端日志
+# 更新代码后重新部署
+bash docker/deploy.sh
+
+# 后端日志
 tail -f logs/backend.log
 
 # 停止
 docker compose -f docker/docker-compose.yml down
 kill "$(cat .backend.pid)"
-
-# 更新代码后重新部署(本地一条命令)
-bash docker/deploy.sh          # start.sh 会自动重启后端、重建前端、刷新 nginx
 ```
 
 ## 备注
 
-- **为什么后端不在容器里**:你指定用服务器 conda 的 `dogs` 环境;放宿主机跑最简单,
-  免去 Dockerfile 与二进制打包。代价:服务器需自带 conda/Node。
-- **host 网络**:nginx 容器共享宿主机网络以直连 `127.0.0.1:8000`;若 80 端口被占,
-  改 `nginx.conf` 的 `listen` 与(去 host 网络时)`docker-compose.yml` 的端口映射。
-- **HTTPS**:当前仅 HTTP(80)。如需 HTTPS(安卓 APK 访问也需要),加 certbot 或在
-  nginx 配 443 + 证书;后续可补。
+- 前端改了只需 `npm run build` + 重启前端容器(`deploy.sh` 自动完成);后端改了重启后端进程。
+- edge-nginx 配置变更只在 `conf.d/` 新增/覆盖 `douyin.xuziyue.work.conf`,**不动 `edge.conf`**;
+  `deploy.sh` 会先 `nginx -t` 校验全部配置再 reload,失败不 reload,不影响其他站。

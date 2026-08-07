@@ -15,6 +15,15 @@ CONDA_ENV="${CONDA_ENV:-dogs}"
 SERVE_PORT="${SERVE_PORT:-8000}"
 
 echo "== [1/3] 构建前端 (npm run build) =="
+# PWA 的 service worker 压缩需要 Node 20+(全局 crypto);非交互 shell 不会自动激活 nvm,
+# 这里显式 source nvm 并切到 LTS。无 nvm 则回退系统 node(若 <20 会构建失败)。
+export NVM_DIR="$HOME/.nvm"
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+  # shellcheck disable=SC1091
+  source "$NVM_DIR/nvm.sh"
+  nvm use --lts >/dev/null 2>&1 || true
+fi
+echo "  node: $(node -v 2>&1)"
 cd web
 if [[ ! -d node_modules ]]; then
   echo "  node_modules 不存在,执行 npm ci..."

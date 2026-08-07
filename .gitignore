@@ -45,6 +45,11 @@ config*.yml
 config/cookies.json
 .omx/
 
+# 环境变量(含服务器 SSH 密码等,绝不提交)
+.env
+.env.*
+!.env.example
+
 # Editor / IDE local settings
 .claude/
 .idea/
@@ -56,3 +61,11 @@ config/cookies.json
 web/node_modules/
 web/dist/
 server/static/
+
+# Capacitor generated native project (run `npx cap add android` to recreate)
+web/android/
+web/ios/
+
+# Android release signing keys (never commit)
+*.keystore
+*.jks

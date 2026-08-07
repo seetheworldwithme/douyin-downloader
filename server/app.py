@@ -21,7 +21,6 @@ import pathlib
 import secrets
 import time
 from typing import Any, Dict, Optional
-
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request

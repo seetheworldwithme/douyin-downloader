@@ -10,7 +10,6 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from fastapi import HTTPException
 
 from config import ConfigLoader
 from server.app import build_app, issue_token

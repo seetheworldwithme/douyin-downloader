@@ -19,9 +19,12 @@ echo "== [1/3] 构建前端 (npm run build) =="
 # 这里显式 source nvm 并切到 LTS。无 nvm 则回退系统 node(若 <20 会构建失败)。
 export NVM_DIR="$HOME/.nvm"
 if [ -s "$NVM_DIR/nvm.sh" ]; then
+  # nvm.sh 引用未定义变量,与 set -u 冲突,临时关闭
+  set +u
   # shellcheck disable=SC1091
   source "$NVM_DIR/nvm.sh"
   nvm use --lts >/dev/null 2>&1 || true
+  set -u
 fi
 echo "  node: $(node -v 2>&1)"
 cd web
@@ -61,8 +64,10 @@ done
 if [[ -z "$CONDA_SH" ]]; then
   echo "  找不到 conda.sh(确认 conda 已安装)"; exit 1
 fi
+set +u  # conda.sh 同样不耐 set -u
 # shellcheck disable=SC1090
 source "$CONDA_SH"
+set -u
 
 conda activate "$CONDA_ENV"
 mkdir -p logs

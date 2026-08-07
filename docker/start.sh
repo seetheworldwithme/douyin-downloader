@@ -79,15 +79,17 @@ disown 2>/dev/null || true
 echo "  后端 PID $(cat .backend.pid) (日志: logs/backend.log)"
 
 echo "== [3/3] 启动前端 nginx 容器 (127.0.0.1:8083) =="
-# 兼容 v2 插件(docker compose)与 v1(docker-compose)
+# 兼容 v2 插件(docker compose)与 v1(docker-compose)。
+# 显式 -p douyin:docker-compose v1 默认用 compose 文件所在目录名(docker)做项目名,
+# 会和其它同样放在 docker/ 子目录的服务(如 calendar-site)撞项目、误删/重建对方容器。
 if docker compose version >/dev/null 2>&1; then COMPOSE=(docker compose)
 elif command -v docker-compose >/dev/null 2>&1; then COMPOSE=(docker-compose)
 else echo "  找不到 docker compose(v2 插件或 v1 docker-compose)"; exit 1; fi
-"${COMPOSE[@]}" -f docker/docker-compose.yml up -d
+"${COMPOSE[@]}" -p douyin -f docker/docker-compose.yml up -d
 
 echo
 echo "✓ 启动完成。"
 echo "  - 前端容器: douyin-web @ 127.0.0.1:8083"
 echo "  - 后端 API: 127.0.0.1:$SERVE_PORT"
 echo "  - 对外(经 edge-nginx): https://douyin.xuziyue.work/"
-echo "  - 停止: docker-compose -f docker/docker-compose.yml down ; kill \$(cat .backend.pid)"
+echo "  - 停止: docker-compose -p douyin -f docker/docker-compose.yml down ; kill \$(cat .backend.pid)"

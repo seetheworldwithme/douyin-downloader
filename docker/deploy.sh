@@ -41,13 +41,15 @@ sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${IP}" "
   echo \"HEAD: \$(git rev-parse --short HEAD)\"
 "
 
-echo "== [2/4] 同步密钥配置 =="
+echo "== [2/4] 密钥配置(远端为权威,仅在缺失时推送)=="
 for f in config.yml .cookies.json; do
-  if [[ -f "$REPO_DIR/$f" ]]; then
-    echo "  → $f"
+  if sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${IP}" "test -f '${CODE_DIR}/${f}'"; then
+    echo "  远端已有 $f,保留不覆盖"
+  elif [[ -f "$REPO_DIR/$f" ]]; then
+    echo "  远端缺 $f,从本地推送"
     sshpass -p "$PASS" scp "${SSH_OPTS[@]}" "$REPO_DIR/$f" "${REMOTE_USER}@${IP}:${CODE_DIR}/${f}"
   else
-    echo "  ⚠ 本地无 $f,跳过(后端需要 config.yml 与 .cookies.json)"
+    echo "  ⚠ 本地与远端均无 $f(后端需要它)"
   fi
 done
 

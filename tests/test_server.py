@@ -53,6 +53,33 @@ def test_login_wrong_password(tmp_path):
         assert resp.status_code == 401
 
 
+def test_login_with_users_list(tmp_path):
+    """auth.users 列表里的账号可登录(与单账号共存,共享同一 secret)。"""
+    app = _make_app(
+        tmp_path,
+        auth={
+            "username": "u",
+            "password": "p",
+            "secret": "s",
+            "users": [{"username": "alice", "password": "alice-pwd"}],
+        },
+    )
+    with TestClient(app) as client:
+        # 列表账号
+        r1 = client.post("/api/v1/login", json={"username": "alice", "password": "alice-pwd"})
+        assert r1.status_code == 200
+        assert "token" in r1.json()
+        # 单账号仍可用
+        r2 = client.post("/api/v1/login", json={"username": "u", "password": "p"})
+        assert r2.status_code == 200
+        # 列表账号密码错
+        r3 = client.post("/api/v1/login", json={"username": "alice", "password": "x"})
+        assert r3.status_code == 401
+        # 未知账号
+        r4 = client.post("/api/v1/login", json={"username": "bob", "password": "x"})
+        assert r4.status_code == 401
+
+
 def test_stream_requires_auth(tmp_path):
     app = _make_app(tmp_path, auth={"username": "u", "password": "p", "secret": "s"})
     with TestClient(app) as client:

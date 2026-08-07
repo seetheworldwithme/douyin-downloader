@@ -31,16 +31,24 @@ if [[ -f .backend.pid ]] && kill -0 "$(cat .backend.pid)" 2>/dev/null; then
   sleep 1
 fi
 
+# conda 常不在非交互 shell 的 PATH 里(.bashrc 的 conda init 被交互检查挡住),
+# 故显式 source conda.sh。覆盖常见安装位置(含本机的 ~/software/miniconda3)。
+CONDA_SH=""
 if command -v conda >/dev/null 2>&1; then
-  source "$(conda info --base)/etc/profile.d/conda.sh"
-elif [[ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]]; then
-  source "$HOME/miniconda3/etc/profile.d/conda.sh"
-elif [[ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]]; then
-  source "$HOME/anaconda3/etc/profile.d/conda.sh"
-else
-  echo "  找不到 conda(deploy.sh 用 bash -lc 调用本脚本以加载 conda 初始化)"
-  exit 1
+  CONDA_SH="$(conda info --base 2>/dev/null)/etc/profile.d/conda.sh"
 fi
+for cand in "$CONDA_SH" \
+            "$HOME/software/miniconda3/etc/profile.d/conda.sh" \
+            "$HOME/miniconda3/etc/profile.d/conda.sh" \
+            "$HOME/anaconda3/etc/profile.d/conda.sh" \
+            "/opt/conda/etc/profile.d/conda.sh"; do
+  if [[ -n "$cand" && -f "$cand" ]]; then CONDA_SH="$cand"; break; fi
+done
+if [[ -z "$CONDA_SH" ]]; then
+  echo "  找不到 conda.sh(确认 conda 已安装)"; exit 1
+fi
+# shellcheck disable=SC1090
+source "$CONDA_SH"
 
 conda activate "$CONDA_ENV"
 mkdir -p logs

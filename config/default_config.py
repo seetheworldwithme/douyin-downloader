@@ -114,5 +114,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         # HMAC 签名密钥。留空会在启动时生成临时密钥（重启后所有 token 失效）。
         # 生产建议填随机字符串：python -c "import secrets;print(secrets.token_urlsafe(32))"
         "secret": "",
+        # 额外账号列表:[{username, password}, ...];所有账号共享同一个 secret。
+        "users": [],
     },
 }

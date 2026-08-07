@@ -150,6 +150,17 @@ class _ServerDeps:
             logger.warning("auth.secret 未配置,使用临时密钥(重启后所有 token 失效)")
         self.auth_secret = secret
 
+        # 账号表:兼容单账号(username/password)+ users 列表;所有账号共享同一个 secret
+        accounts = {}
+        if self.auth_username and self.auth_password:
+            accounts[self.auth_username] = self.auth_password
+        for u in auth_cfg.get("users") or []:
+            if isinstance(u, dict):
+                un = str(u.get("username") or "").strip()
+                if un:
+                    accounts[un] = str(u.get("password") or "")
+        self.auth_accounts = accounts
+
         # 跨域来源:server.cors_origins 覆盖默认列表;支持 ["*"] 全放开。
         server_cfg = config.get("server") or {}
         if not isinstance(server_cfg, dict):
@@ -292,10 +303,8 @@ def build_app(config: ConfigLoader) -> FastAPI:
 
     @app.post("/api/v1/login")
     async def login(req: LoginRequest) -> Dict[str, str]:
-        ok = hmac.compare_digest(req.username or "", deps.auth_username) and hmac.compare_digest(
-            req.password or "", deps.auth_password
-        )
-        if not ok:
+        expected = deps.auth_accounts.get(req.username or "")
+        if expected is None or not hmac.compare_digest(req.password or "", expected):
             raise HTTPException(status_code=401, detail="用户名或密码错误")
         return {"token": issue_token(req.username, deps.auth_secret)}
 

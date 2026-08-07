@@ -79,11 +79,15 @@ disown 2>/dev/null || true
 echo "  后端 PID $(cat .backend.pid) (日志: logs/backend.log)"
 
 echo "== [3/3] 启动前端 nginx 容器 (127.0.0.1:8083) =="
-docker compose -f docker/docker-compose.yml up -d
+# 兼容 v2 插件(docker compose)与 v1(docker-compose)
+if docker compose version >/dev/null 2>&1; then COMPOSE=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then COMPOSE=(docker-compose)
+else echo "  找不到 docker compose(v2 插件或 v1 docker-compose)"; exit 1; fi
+"${COMPOSE[@]}" -f docker/docker-compose.yml up -d
 
 echo
 echo "✓ 启动完成。"
 echo "  - 前端容器: douyin-web @ 127.0.0.1:8083"
 echo "  - 后端 API: 127.0.0.1:$SERVE_PORT"
 echo "  - 对外(经 edge-nginx): https://douyin.xuziyue.work/"
-echo "  - 停止: docker compose -f docker/docker-compose.yml down ; kill \$(cat .backend.pid)"
+echo "  - 停止: docker-compose -f docker/docker-compose.yml down ; kill \$(cat .backend.pid)"

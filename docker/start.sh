@@ -19,6 +19,11 @@ cd web
 if [[ ! -d node_modules ]]; then
   echo "  node_modules 不存在,执行 npm ci..."
   npm ci
+else
+  # node_modules 已存在:用 npm install 增量同步(补齐 package.json 新增依赖,
+  # 如 vite-plugin-pwa / @capacitor/*),避免旧目录缺包导致构建失败。
+  echo "  同步依赖(npm install)..."
+  npm install
 fi
 npm run build
 cd "$REPO_DIR"

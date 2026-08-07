@@ -400,9 +400,3 @@ class FileManager:
             return file_path.exists() and file_path.stat().st_size > 0
         except OSError:
             return False
-
-    def get_file_size(self, file_path: Path) -> int:
-        try:
-            return file_path.stat().st_size if self.file_exists(file_path) else 0
-        except OSError:
-            return 0

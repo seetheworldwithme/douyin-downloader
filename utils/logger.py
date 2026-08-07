@@ -2,7 +2,6 @@ import logging
 import sys
 from pathlib import Path
 
-_APP_LOGGER_PREFIX = "dy-downloader"
 _KNOWN_LOGGER_NAMES = set()
 
 

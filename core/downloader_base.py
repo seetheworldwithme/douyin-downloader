@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import re
@@ -188,6 +190,7 @@ class BaseDownloader(ABC):
         pass
 
     async def _should_download(self, aweme_id: str) -> bool:
+        await self._ensure_local_aweme_index()
         in_local = self._is_locally_downloaded(aweme_id)
         in_db = False
         if self.database:
@@ -219,6 +222,20 @@ class BaseDownloader(ABC):
         if self._local_aweme_ids is None:
             return False
         return aweme_id in self._local_aweme_ids
+
+    async def _ensure_local_aweme_index(self) -> None:
+        """在 async 下载主路径上提前、离线地构建本地作品索引。
+
+        rglob/stat 可能遍历整个下载库，是潜在的长阻塞；放到线程池执行，
+        避免在 async 下载路径上卡住事件循环。索引有进程级缓存
+        （``_LOCAL_AWEME_INDEX_CACHE``），同一根目录只构建一次。
+
+        ``_should_download`` 先 await 本方法，随后 ``_is_locally_downloaded``
+        命中缓存即纯字典查找；同步的惰性构建仍保留，供 retry 路径与直接
+        调用（见 tests/test_downloader_base_perf.py）使用。
+        """
+        if self._local_aweme_ids is None:
+            await asyncio.to_thread(self._build_local_aweme_index)
 
     def _build_local_aweme_index(self):
         base_path = self.file_manager.base_path
@@ -932,15 +949,6 @@ class BaseDownloader(ABC):
         )[0]
         short_edge = int(nearest[:-1])
         return short_edge, long_edge * short_edge
-
-    @staticmethod
-    def _pick_highest_quality_play_addr(video: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Shortcut for highest-quality selection (backward-compatible).
-
-        Kept for older callers; new code should use
-        :meth:`_pick_play_addr_by_quality` with an explicit quality string.
-        """
-        return BaseDownloader._pick_play_addr_by_quality(video, "highest")
 
     @staticmethod
     def _pick_play_addr_by_quality(

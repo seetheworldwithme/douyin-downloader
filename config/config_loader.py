@@ -335,32 +335,30 @@ class ConfigLoader:
         return links
 
     def validate(self) -> bool:
+        # 数值字段强制转换放在最前，且不依赖 links/path 是否齐全：server 等不要求
+        # links 的入口也会调用本方法拿合法值，避免下游 float()/int() 因 None 或
+        # 非数字（如 rate_limit: "fast"）直接崩溃；rate_limit 此前完全漏转。
+        for key, default, minimum, as_float in (
+            ("thread", 5, 1, False),
+            ("retry_times", 3, 0, False),
+            ("rate_limit", 2.0, 0, True),
+        ):
+            value = self.config.get(key)
+            if value is None:
+                continue
+            try:
+                coerced = float(value) if as_float else int(value)
+                if coerced < minimum:
+                    raise ValueError
+                self.config[key] = coerced
+            except (TypeError, ValueError):
+                logger.warning("Invalid %s value: %s, using default %s", key, value, default)
+                self.config[key] = default
+
         if not self.get_links():
             return False
         if not self.config.get("path"):
             return False
-
-        thread = self.config.get("thread")
-        if thread is not None:
-            try:
-                thread_val = int(thread)
-                if thread_val < 1:
-                    raise ValueError
-                self.config["thread"] = thread_val
-            except (TypeError, ValueError):
-                logger.warning("Invalid thread value: %s, using default 5", thread)
-                self.config["thread"] = 5
-
-        retry_times = self.config.get("retry_times")
-        if retry_times is not None:
-            try:
-                retry_val = int(retry_times)
-                if retry_val < 0:
-                    raise ValueError
-                self.config["retry_times"] = retry_val
-            except (TypeError, ValueError):
-                logger.warning("Invalid retry_times value: %s, using default 3", retry_times)
-                self.config["retry_times"] = 3
 
         for field in ("start_time", "end_time"):
             value = self.config.get(field)

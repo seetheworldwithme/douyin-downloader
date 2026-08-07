@@ -24,11 +24,6 @@ def test_file_exists_returns_true_for_non_empty(tmp_path):
     assert fm.file_exists(real) is True
 
 
-def test_get_file_size_returns_0_for_missing(tmp_path):
-    fm = FileManager(str(tmp_path))
-    assert fm.get_file_size(tmp_path / "nope.mp4") == 0
-
-
 def test_get_save_path_creates_directories(tmp_path):
     fm = FileManager(str(tmp_path))
     path = fm.get_save_path(

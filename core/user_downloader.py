@@ -278,13 +278,6 @@ class UserDownloader(BaseDownloader):
 
         return result
 
-    # 向后兼容：旧测试仍直接调用 post 下载入口。
-    async def _download_user_post(self, sec_uid: str, user_info: Dict[str, Any]) -> DownloadResult:
-        strategy = self._get_mode_strategy("post")
-        if strategy is None:
-            return DownloadResult()
-        return await strategy.download_mode(sec_uid, user_info, seen_aweme_ids=set())
-
     async def _recover_user_post_with_browser(
         self,
         sec_uid: str,

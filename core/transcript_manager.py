@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import tempfile
@@ -208,8 +209,9 @@ class TranscriptManager:
 
         try:
             if not is_source_audio and self._upload_audio_only():
-                tmp_audio_dir = tempfile.TemporaryDirectory(
-                    prefix="transcript_audio_"
+                tmp_audio_dir = await asyncio.to_thread(
+                    tempfile.TemporaryDirectory,
+                    prefix="transcript_audio_",
                 )
                 try:
                     upload_path = await extract_audio(
@@ -298,7 +300,7 @@ class TranscriptManager:
                 # surface as a transcript task failure — log a WARNING and
                 # let the surrounding return path run.
                 try:
-                    tmp_audio_dir.cleanup()
+                    await asyncio.to_thread(tmp_audio_dir.cleanup)
                 except Exception as exc:  # noqa: BLE001 — broad is correct here
                     logger.warning(
                         "Failed to clean up transcript audio temp dir %s: %r",
@@ -337,7 +339,7 @@ class TranscriptManager:
         ``filename`` + ``content_type`` so the multipart body advertises
         the right MIME.
         """
-        if not file_path.exists():
+        if not await asyncio.to_thread(file_path.exists):
             raise FileNotFoundError(f"Upload file not found: {file_path}")
 
         transcript_cfg = self._cfg()
@@ -350,36 +352,38 @@ class TranscriptManager:
         if language_hint:
             form.add_field("language", language_hint)
 
-        with file_path.open("rb") as f:
-            form.add_field(
-                "file",
-                f,
-                filename=filename,
-                content_type=content_type,
-            )
-            timeout = aiohttp.ClientTimeout(total=600)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    api_url,
-                    data=form,
-                    headers={"Authorization": f"Bearer {api_key}"},
-                ) as response:
-                    if response.status != 200:
-                        body = await response.text()
-                        # Some misbehaving proxies echo the bearer token
-                        # into 4xx error pages; redact before the body
-                        # ends up in ``transcript_jobs.error_message``
-                        # (Property 1 / 2).
-                        if api_key and api_key in body:
-                            body = body.replace(api_key, _mask_api_key_local(api_key))
-                        raise RuntimeError(
-                            f"OpenAI transcription failed: status={response.status}, body={body}"
-                        )
+        # 整文件读入内存（音频通常几 MB）再上传，避免在事件循环上对阻塞式文件
+        # 句柄做同步读取；读盘放到线程池。
+        file_bytes = await asyncio.to_thread(file_path.read_bytes)
+        form.add_field(
+            "file",
+            file_bytes,
+            filename=filename,
+            content_type=content_type,
+        )
+        timeout = aiohttp.ClientTimeout(total=600)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                api_url,
+                data=form,
+                headers={"Authorization": f"Bearer {api_key}"},
+            ) as response:
+                if response.status != 200:
+                    body = await response.text()
+                    # Some misbehaving proxies echo the bearer token
+                    # into 4xx error pages; redact before the body
+                    # ends up in ``transcript_jobs.error_message``
+                    # (Property 1 / 2).
+                    if api_key and api_key in body:
+                        body = body.replace(api_key, _mask_api_key_local(api_key))
+                    raise RuntimeError(
+                        f"OpenAI transcription failed: status={response.status}, body={body}"
+                    )
 
-                    payload = await response.json(content_type=None)
-                    if not isinstance(payload, dict):
-                        raise RuntimeError("OpenAI transcription returned invalid payload")
-                    return payload
+                payload = await response.json(content_type=None)
+                if not isinstance(payload, dict):
+                    raise RuntimeError("OpenAI transcription returned invalid payload")
+                return payload
 
     @staticmethod
     def _guess_video_content_type(video_path: Path) -> str:

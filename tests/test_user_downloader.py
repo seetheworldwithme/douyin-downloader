@@ -141,7 +141,7 @@ def test_user_post_browser_fallback_recovers_missing_pages(tmp_path, monkeypatch
     monkeypatch.setattr(downloader, "_download_aweme_assets", _always_true)
 
     result = asyncio.run(
-        downloader._download_user_post(
+        downloader._get_mode_strategy("post").download_mode(
             "sec_uid_x",
             {"uid": "uid-1", "nickname": "tester", "aweme_count": 3},
         )
@@ -166,7 +166,7 @@ def test_user_post_browser_fallback_can_be_disabled(tmp_path, monkeypatch):
     monkeypatch.setattr(downloader, "_download_aweme_assets", _always_true)
 
     result = asyncio.run(
-        downloader._download_user_post(
+        downloader._get_mode_strategy("post").download_mode(
             "sec_uid_x",
             {"uid": "uid-1", "nickname": "tester", "aweme_count": 3},
         )
@@ -194,7 +194,7 @@ def test_user_post_browser_fallback_prefers_browser_aweme_items(tmp_path, monkey
     monkeypatch.setattr(downloader, "_download_aweme_assets", _always_true)
 
     result = asyncio.run(
-        downloader._download_user_post(
+        downloader._get_mode_strategy("post").download_mode(
             "sec_uid_x",
             {"uid": "uid-1", "nickname": "tester", "aweme_count": 3},
         )
@@ -221,7 +221,7 @@ def test_user_post_browser_fallback_expected_count_uses_number_limit(tmp_path, m
     monkeypatch.setattr(downloader, "_download_aweme_assets", _always_true)
 
     result = asyncio.run(
-        downloader._download_user_post(
+        downloader._get_mode_strategy("post").download_mode(
             "sec_uid_x",
             {"uid": "uid-1", "nickname": "tester", "aweme_count": 999},
         )
@@ -275,7 +275,7 @@ def test_user_post_skips_pinned_before_number_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(downloader, "_download_aweme_assets", _download_aweme_assets)
 
     result = asyncio.run(
-        downloader._download_user_post(
+        downloader._get_mode_strategy("post").download_mode(
             "sec_uid_x",
             {"uid": "uid-1", "nickname": "tester", "aweme_count": 4},
         )
@@ -306,7 +306,7 @@ def test_user_post_reports_step_and_item_progress(tmp_path, monkeypatch):
     monkeypatch.setattr(downloader, "_download_aweme_assets", _fake_download_aweme_assets)
 
     result = asyncio.run(
-        downloader._download_user_post(
+        downloader._get_mode_strategy("post").download_mode(
             "sec_uid_x",
             {"uid": "uid-1", "nickname": "tester", "aweme_count": 3},
         )

@@ -16,9 +16,3 @@ def format_size(bytes_size: int) -> str:
     return f"{bytes_size:.2f} TB"
 
 
-def format_duration(seconds: int) -> str:
-    hours, remainder = divmod(seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    if hours > 0:
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-    return f"{minutes:02d}:{seconds:02d}"

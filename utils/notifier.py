@@ -108,6 +108,20 @@ def _masked_config_for_log(provider_type: str, config: Dict[str, Any]) -> Dict[s
     return masked
 
 
+def _safe_exc_message(exc: BaseException, *secrets: str) -> str:
+    """Render ``str(exc)`` with any supplied secret substrings redacted.
+
+    Notification providers embed credentials in the request URL path
+    (Bark ``device_key``、Telegram ``bot_token``)。部分 aiohttp 异常会把请求
+    URL 字符串化，否则密钥会落进日志。传入每个敏感子串，日志前先脱敏。
+    """
+    msg = str(exc)
+    for secret in secrets:
+        if secret:
+            msg = msg.replace(secret, "***")
+    return msg
+
+
 class _BaseProvider:
     def __init__(self, settings: Dict[str, Any]):
         self.settings = settings or {}
@@ -140,7 +154,8 @@ class BarkProvider(_BaseProvider):
                     logger.warning("Bark notification HTTP %s", resp.status)
                 return ok
         except Exception as exc:
-            logger.warning("Bark notification failed: %s", exc)
+            # url 含 device_key，部分异常会字符串化请求 URL，日志前先脱敏
+            logger.warning("Bark notification failed: %s", _safe_exc_message(exc, url))
             return False
 
 
@@ -167,7 +182,10 @@ class TelegramProvider(_BaseProvider):
                     logger.warning("Telegram notification HTTP %s", resp.status)
                 return ok
         except Exception as exc:
-            logger.warning("Telegram notification failed: %s", exc)
+            # url 含 bot_token，部分异常会字符串化请求 URL，日志前先脱敏
+            logger.warning(
+                "Telegram notification failed: %s", _safe_exc_message(exc, url, bot_token)
+            )
             return False
 
 
@@ -192,7 +210,7 @@ class WebhookProvider(_BaseProvider):
                     logger.warning("Webhook notification HTTP %s", resp.status)
                 return ok
         except Exception as exc:
-            logger.warning("Webhook notification failed: %s", exc)
+            logger.warning("Webhook notification failed: %s", _safe_exc_message(exc, url))
             return False
 
 

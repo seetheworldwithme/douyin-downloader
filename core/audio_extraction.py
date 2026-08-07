@@ -64,14 +64,6 @@ class AudioExtractEmpty(AudioExtractError):
     cause = "audio_extract_empty"
 
 
-class PlatformUnsupported(AudioExtractError):
-    """``imageio-ffmpeg`` 在当前 OS / 架构上没有静态二进制（极少数
-    边角平台，例如某些 Linux ARM 子架构）。本质是 :class:`FfmpegNotAvailable`
-    的特例，但用独立 ``cause`` 让上层日志能区分。"""
-
-    cause = "platform_unsupported"
-
-
 # ---------------------------------------------------------------------------
 # FfmpegLocator
 # ---------------------------------------------------------------------------
@@ -389,6 +381,5 @@ __all__ = [
     "FfmpegNonZeroExit",
     "FfmpegNotAvailable",
     "FfmpegTimeout",
-    "PlatformUnsupported",
     "extract_audio",
 ]

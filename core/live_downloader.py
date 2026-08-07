@@ -247,7 +247,7 @@ class LiveDownloader(BaseDownloader):
         headers["Referer"] = "https://live.douyin.com/"
         headers["Origin"] = "https://live.douyin.com"
 
-        def _promote_if_nonempty(reason: str) -> bool:
+        async def _promote_if_nonempty(reason: str) -> bool:
             if bytes_written <= 0:
                 # 零字节也尝试清理 .tmp
                 try:
@@ -256,7 +256,7 @@ class LiveDownloader(BaseDownloader):
                     pass
                 return False
             try:
-                os.replace(str(tmp_path), str(target_path))
+                await asyncio.to_thread(os.replace, str(tmp_path), str(target_path))
             except Exception as exc:
                 # 捕获所有异常：理论上只会是 OSError，但 rename 失败时宁可多兜底也别泄漏。
                 logger.error("Live tmp → final rename failed: %s", exc)
@@ -294,20 +294,20 @@ class LiveDownloader(BaseDownloader):
                                 max_duration,
                             )
                             break
-            return _promote_if_nonempty("stream ended")
+            return await _promote_if_nonempty("stream ended")
         except asyncio.CancelledError:
             # 外部取消（Ctrl+C 等）：保留已录制内容
-            _promote_if_nonempty("cancelled")
+            await _promote_if_nonempty("cancelled")
             raise
         except aiohttp.ClientPayloadError as exc:
             # 直播中断（主播下播）常见表现，视为正常结束
             logger.info("Live payload ended: %s", exc)
-            return _promote_if_nonempty("payload ended")
+            return await _promote_if_nonempty("payload ended")
         except (asyncio.TimeoutError, aiohttp.ServerTimeoutError) as exc:
             # sock_read 空闲超时——多数情况是主播停止推流，保留已录数据
             logger.info("Live stream idle timeout after %ss: %s", idle_timeout, exc)
-            return _promote_if_nonempty("idle timeout")
+            return await _promote_if_nonempty("idle timeout")
         except Exception as exc:
             logger.error("Live stream recording failed: %s", exc)
             # 其它未知异常也尽量保留已写入的数据
-            return _promote_if_nonempty("unexpected error")
+            return await _promote_if_nonempty("unexpected error")

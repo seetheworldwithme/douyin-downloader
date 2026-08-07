@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
@@ -21,6 +22,11 @@ except Exception:  # pragma: no cover - optional dependency
 logger = setup_logger("APIClient")
 
 _LOGIN_REQUIRED_STATUS_CODES = {2483}
+
+# msToken 刷新间隔（秒）。msToken 会随会话老化失效，失效后抖音常以空 200 反爬；
+# 此前 token 一旦设置就永不刷新，导致整段会话空转。这里做定时刷新，并在
+# _request_json 里按连续空 200 做反应式作废。
+_MS_TOKEN_TTL_SECONDS = 1800
 
 
 class LoginRequiredError(Exception):
@@ -93,6 +99,10 @@ class DouyinAPIClient:
         self._signer = XBogus(self.headers["User-Agent"])
         self._ms_token_manager = MsTokenManager(user_agent=self.headers["User-Agent"])
         self._ms_token = (self.cookies.get("msToken") or "").strip()
+        # 记录 token 获取时刻，配合 _MS_TOKEN_TTL_SECONDS 做定时刷新
+        self._ms_token_acquired_at = time.monotonic() if self._ms_token else 0.0
+        # 连续空 200 计数：达阈值即作废缓存 token，触发下一次重新获取
+        self._empty_200_streak = 0
         self._abogus_enabled = ABogus is not None and BrowserFingerprintGenerator is not None
 
     async def __aenter__(self) -> "DouyinAPIClient":
@@ -122,7 +132,8 @@ class DouyinAPIClient:
         return self._session
 
     async def _ensure_ms_token(self) -> str:
-        if self._ms_token:
+        now = time.monotonic()
+        if self._ms_token and (now - self._ms_token_acquired_at) < _MS_TOKEN_TTL_SECONDS:
             return self._ms_token
 
         token = await asyncio.to_thread(
@@ -130,6 +141,7 @@ class DouyinAPIClient:
             self.cookies,
         )
         self._ms_token = token.strip()
+        self._ms_token_acquired_at = now
         if self._ms_token:
             self.cookies["msToken"] = self._ms_token
             if self._session and not self._session.closed:
@@ -229,6 +241,16 @@ class DouyinAPIClient:
                                 max_retries,
                             )
                             last_exc = RuntimeError(f"Empty 200 response for {path} (anti-bot)")
+                            # 连续空 200 多为 msToken 失效：累计达阈值即作废缓存 token，
+                            # 让下一次 _ensure_ms_token() 重新获取，避免整段会话空转。
+                            self._empty_200_streak += 1
+                            if self._empty_200_streak >= 2:
+                                logger.info(
+                                    "Invalidating msToken after %d consecutive empty-200s",
+                                    self._empty_200_streak,
+                                )
+                                self._ms_token = ""
+                                self._ms_token_acquired_at = 0.0
                             if attempt < max_retries - 1:
                                 delay = delays[min(attempt, len(delays) - 1)]
                                 await asyncio.sleep(delay)
@@ -248,6 +270,7 @@ class DouyinAPIClient:
                                 )
                                 return {}
                         result = data if isinstance(data, dict) else {}
+                        self._empty_200_streak = 0  # 拿到正常响应，重置空 200 连续计数
                         if _is_login_required(result):
                             raise LoginRequiredError(
                                 int(result.get("status_code") or 0),
@@ -292,8 +315,7 @@ class DouyinAPIClient:
         source: str = "api",
     ) -> Dict[str, Any]:
         raw = raw_data if isinstance(raw_data, dict) else {}
-        keys = item_keys or []
-        keys = ["items", *keys, "aweme_list", "mix_list", "music_list"]
+        keys = ["items", *(item_keys or []), "aweme_list", "mix_list", "music_list"]
 
         items: List[Dict[str, Any]] = []
         for key in keys:
@@ -866,10 +888,27 @@ class DouyinAPIClient:
                 if not comment_id or int(comment.get("reply_comment_total") or 0) <= 0:
                     continue
                 try:
-                    reply_page = await self.get_aweme_comment_replies(
-                        aweme_id=aweme_id, comment_id=str(comment_id), count=count
-                    )
-                    comment["_replies"] = reply_page.get("items") or []
+                    # 二级回复也可能分页：按 has_more / cursor 翻页直到取尽。
+                    # 此前只请求第一页（cursor 恒为 0），>一页的回复会静默丢失。
+                    # 安全上限 50 页，配合游标停滞保护，避免异常响应导致死循环。
+                    all_replies: List[Dict[str, Any]] = []
+                    reply_cursor = 0
+                    for _ in range(50):
+                        reply_page = await self.get_aweme_comment_replies(
+                            aweme_id=aweme_id,
+                            comment_id=str(comment_id),
+                            cursor=reply_cursor,
+                            count=count,
+                        )
+                        page_items = reply_page.get("items") or []
+                        all_replies.extend(page_items)
+                        if not reply_page.get("has_more"):
+                            break
+                        next_cursor = reply_page.get("max_cursor") or 0
+                        if next_cursor <= reply_cursor:
+                            break  # 游标未前进，退出避免死循环
+                        reply_cursor = next_cursor
+                    comment["_replies"] = all_replies
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("Fetch reply for comment %s failed: %s", comment_id, exc)
         return normalized

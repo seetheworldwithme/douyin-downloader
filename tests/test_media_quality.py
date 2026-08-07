@@ -29,9 +29,9 @@ def _build_video_downloader(tmp_path):
 
 class TestPickHighestQualityPlayAddr:
     def test_empty_input_returns_none(self):
-        assert BaseDownloader._pick_highest_quality_play_addr({}) is None
-        assert BaseDownloader._pick_highest_quality_play_addr({"bit_rate": []}) is None
-        assert BaseDownloader._pick_highest_quality_play_addr({"bit_rate": None}) is None
+        assert BaseDownloader._pick_play_addr_by_quality({}) is None
+        assert BaseDownloader._pick_play_addr_by_quality({"bit_rate": []}) is None
+        assert BaseDownloader._pick_play_addr_by_quality({"bit_rate": None}) is None
 
     def test_selects_highest_bit_rate(self):
         video = {
@@ -50,7 +50,7 @@ class TestPickHighestQualityPlayAddr:
                 },
             ]
         }
-        best = BaseDownloader._pick_highest_quality_play_addr(video)
+        best = BaseDownloader._pick_play_addr_by_quality(video)
         assert best is not None
         assert best["url_list"] == ["https://high.example/video"]
 
@@ -73,7 +73,7 @@ class TestPickHighestQualityPlayAddr:
                 },
             ]
         }
-        best = BaseDownloader._pick_highest_quality_play_addr(video)
+        best = BaseDownloader._pick_play_addr_by_quality(video)
         assert best is not None
         assert best["url_list"] == ["https://wider.example/video"]
 
@@ -89,7 +89,7 @@ class TestPickHighestQualityPlayAddr:
                 },
             ]
         }
-        best = BaseDownloader._pick_highest_quality_play_addr(video)
+        best = BaseDownloader._pick_play_addr_by_quality(video)
         assert best is not None
         assert best["url_list"] == ["https://valid.example/v"]
 

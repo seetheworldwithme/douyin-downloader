@@ -75,7 +75,8 @@ class URLParser:
 
     @staticmethod
     def _extract_user_id(url: str) -> Optional[str]:
-        match = re.search(r"/user/([A-Za-z0-9_-]+)", url)
+        # sec_uid 是 base64 形态，含点号（如 MS4wLjABAAAA...），字符类须包含 '.'
+        match = re.search(r"/user/([A-Za-z0-9._-]+)", url)
         if match:
             return match.group(1)
         return None

@@ -806,3 +806,5 @@ class Database:
         if self._conn is not None:
             await self._conn.close()
             self._conn = None
+            # 允许 initialize() 在 close() 之后重新建连并重跑 PRAGMA/迁移
+            self._initialized = False

@@ -26,9 +26,3 @@ class UserModeRegistry:
 
     def get(self, mode: str) -> Optional[Type[BaseUserModeStrategy]]:
         return self._registry.get((mode or "").strip())
-
-    def register(self, mode: str, strategy_cls: Type[BaseUserModeStrategy]) -> None:
-        self._registry[(mode or "").strip()] = strategy_cls
-
-    def all_modes(self):
-        return sorted(self._registry.keys())

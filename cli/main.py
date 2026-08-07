@@ -134,6 +134,9 @@ async def download_url(
             progress_reporter.advance_step("执行下载", "开始拉取与下载资源")
         try:
             result = await downloader.download(parsed)
+        except LoginRequiredError:
+            # 透传给 _run_with_relogin 触发重登+重试，不能被下面的宽泛 except 吞掉
+            raise
         except Exception as exc:
             # Surface fatal downloader errors (e.g. user_info fetch failed
             # because cookies are invalid) as a per-URL failure instead of
@@ -222,7 +225,7 @@ async def main_async(args):
         return
 
     if args.url:
-        urls = args.url if isinstance(args.url, list) else [args.url]
+        urls = args.url
         for url in urls:
             if url not in config.get("link", []):
                 config.update(link=config.get("link", []) + [url])
@@ -329,7 +332,7 @@ async def _run_discovery_subcommand(
                 api_client,
                 args.search,
                 base_path,
-                max_items=int(args.search_max or 50),
+                max_items=args.search_max,
             )
             display.print_success(f"搜索结果已保存：{result['count']} 条 -> {result['path']}")
 

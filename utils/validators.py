@@ -123,6 +123,6 @@ def parse_url_type(url: str) -> Optional[str]:
         return "collection"
     if "/music/" in path:
         return "music"
-    if "/live/" in path or "/follow/live/" in path:
+    if "/live/" in path:
         return "live"
     return None

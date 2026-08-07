@@ -104,8 +104,17 @@ class LiveReplayDownloader(BaseDownloader):
                     output_paths = [video_path, audio_path]
                     remux_status = "remux_failed"
         else:
-            os.replace(str(video_path), str(final_path))
-            output_paths = [final_path]
+            try:
+                await asyncio.to_thread(os.replace, str(video_path), str(final_path))
+                output_paths = [final_path]
+            except OSError as exc:
+                # 跨盘/权限导致 rename 失败时不丢掉已下载的视频，保留原路径
+                logger.warning(
+                    "Rename live-replay video failed (%s); keeping original: %s",
+                    exc,
+                    video_path,
+                )
+                output_paths = [video_path]
             remux_status = "video_only"
 
         await self._record_outputs(
@@ -215,7 +224,9 @@ class LiveReplayDownloader(BaseDownloader):
         )
 
     async def _remux_tracks(self, video_path: Path, audio_path: Path, output_path: Path) -> bool:
-        ffmpeg = resolve_ffmpeg_path()
+        # resolve_ffmpeg_path 首次调用会解包 imageio-ffmpeg 内置二进制并遍历 PATH，
+        # 是磁盘 I/O；移出事件循环避免阻塞并发下载。
+        ffmpeg = await asyncio.to_thread(resolve_ffmpeg_path)
         if not ffmpeg:
             logger.error("ffmpeg not found; cannot merge live replay tracks")
             return False

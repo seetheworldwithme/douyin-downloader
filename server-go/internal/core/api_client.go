@@ -10,17 +10,14 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/xuziyue/douyin-downloader/internal/auth"
 	"github.com/xuziyue/douyin-downloader/internal/utils"
 )
 
 const (
-	baseURL            = "https://www.douyin.com"
-	msTokenTTL         = 30 * time.Minute
-	loginRequiredCode  = 2483
+	baseURL           = "https://www.douyin.com"
+	loginRequiredCode = 2483
 )
 
 var userAgentPool = []string{
@@ -57,23 +54,21 @@ type PagedResponse struct {
 
 // DouyinAPIClient is the HTTP client for Douyin's web API.
 type DouyinAPIClient struct {
-	cookies      map[string]string
-	Proxy        string
-	client       *http.Client
-	headers      map[string]string
-	signer       *utils.XBogus
-	msTokenMgr   *auth.MsTokenManager
-
-	mu               sync.Mutex
-	msToken          string
-	msTokenAcquiredAt time.Time
-	empty200Streak   int
-	abogusEnabled    bool
+	cookies       map[string]string
+	Proxy         string
+	client        *http.Client
+	headers       map[string]string
+	signer        *utils.XBogus
+	abogusEnabled bool
 }
 
 // NewDouyinAPIClient creates a new API client.
 func NewDouyinAPIClient(cookies map[string]string, proxy string) *DouyinAPIClient {
 	cookies = utils.SanitizeCookies(cookies)
+	// Persisted msToken is frequently stale; sending a stale/invalid msToken
+	// triggers Douyin's WAF (HTTP 403). These read endpoints work fine without
+	// it, so drop it from the cookie jar rather than risk an expired token.
+	delete(cookies, "msToken")
 	ua := userAgentPool[rand.Intn(len(userAgentPool))]
 
 	transport := &http.Transport{
@@ -99,13 +94,10 @@ func NewDouyinAPIClient(cookies map[string]string, proxy string) *DouyinAPIClien
 			"User-Agent":      ua,
 			"Referer":         "https://www.douyin.com/?recommend=1",
 			"Accept":          "*/*",
-			"Accept-Encoding": "gzip, deflate",
 			"Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
 		},
-		signer:         utils.NewXBogus(ua),
-		msTokenMgr:     auth.NewMsTokenManager(ua),
-		msToken:        strings.TrimSpace(cookies["msToken"]),
-		abogusEnabled:  true,
+		signer:        utils.NewXBogus(ua),
+		abogusEnabled: true,
 	}
 }
 
@@ -141,26 +133,7 @@ func toInt64(v any) int64 {
 	return 0
 }
 
-// ensureMSToken refreshes the msToken if expired.
-func (c *DouyinAPIClient) ensureMSToken() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.msToken != "" && time.Since(c.msTokenAcquiredAt) < msTokenTTL {
-		return c.msToken
-	}
-
-	token := c.msTokenMgr.EnsureMSToken(c.cookies)
-	c.msToken = strings.TrimSpace(token)
-	c.msTokenAcquiredAt = time.Now()
-	if c.msToken != "" {
-		c.cookies["msToken"] = c.msToken
-	}
-	return c.msToken
-}
-
 func (c *DouyinAPIClient) defaultQuery() url.Values {
-	msToken := c.ensureMSToken()
 	params := url.Values{
 		"device_platform":      {"webapp"},
 		"aid":                  {"6383"},
@@ -191,8 +164,9 @@ func (c *DouyinAPIClient) defaultQuery() url.Values {
 		"support_h265":         {"1"},
 		"support_dash":         {"1"},
 		"uifid":                {""},
-		"msToken":              {msToken},
 	}
+	// msToken is intentionally omitted: a stale persisted token triggers
+	// Douyin's WAF (403), and these endpoints succeed without it.
 	return params
 }
 
@@ -221,101 +195,91 @@ func (c *DouyinAPIClient) buildAbogusURL(baseURLStr, query string) (string, stri
 	return baseURLStr + "?" + signedParams, ua
 }
 
-// RequestJSON performs a signed GET request and returns the parsed JSON.
+// RequestJSON performs an UNSIGNED GET and returns the parsed JSON, retrying a
+// few times with backoff. Douyin rotates its signing algorithm; the reverse-
+// engineered signers (a_bogus / X-Bogus) here fall out of sync and their
+// signatures get rejected by Douyin's WAF (HTTP 403 / verify page). An unsigned
+// request with a valid cookie still succeeds for these read endpoints, so
+// signing is intentionally omitted (see doGet).
 func (c *DouyinAPIClient) RequestJSON(ctx context.Context, path string, params url.Values, maxRetries int) (map[string]any, error) {
 	if maxRetries <= 0 {
 		maxRetries = 3
 	}
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 5 * time.Second}
+	baseURLStr := baseURL + path
 
-	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		signedURL, ua := c.BuildSignedPath(path, params)
+	// doGet issues one UNSIGNED GET. Signing (a_bogus / X-Bogus) is intentionally
+	// disabled here: the reverse-engineered signers produce signatures Douyin's
+	// WAF now rejects (a single bad signature triggers a verify page), while an
+	// unsigned request with a valid cookie succeeds for these read endpoints.
+	doGet := func() (map[string]any, error) {
+		fullURL := baseURLStr + "?" + params.Encode()
+		ua := c.headers["User-Agent"]
 
-		req, err := http.NewRequestWithContext(ctx, "GET", signedURL, nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
 		if err != nil {
-			lastErr = err
-			continue
+			return nil, err
 		}
 		for k, v := range c.headers {
 			req.Header.Set(k, v)
 		}
 		req.Header.Set("User-Agent", ua)
-
-		// Set cookies
 		for k, v := range c.cookies {
 			req.AddCookie(&http.Cookie{Name: k, Value: v})
 		}
 
 		resp, err := c.client.Do(req)
 		if err != nil {
-			lastErr = err
-			if attempt < maxRetries-1 {
-				select {
-				case <-time.After(delays[min(attempt, len(delays)-1)]):
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
-			}
-			continue
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != 200 {
+			// 403 etc. = WAF/anti-bot rejection; retry after backoff.
+			retriable := resp.StatusCode >= 500 || resp.StatusCode == 429
+			return nil, &httpStatusError{code: resp.StatusCode, retriable: retriable, path: path}
 		}
 
-		if resp.StatusCode == 200 {
-			body, err := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			if err != nil {
-				lastErr = err
-				continue
-			}
-			if len(body) == 0 {
-				// Empty 200 — anti-bot signal
-				slog.Warn("Empty 200 response", "path", path, "attempt", attempt+1)
-				c.mu.Lock()
-				c.empty200Streak++
-				if c.empty200Streak >= 2 {
-					slog.Info("Invalidating msToken after empty-200s", "streak", c.empty200Streak)
-					c.msToken = ""
-					c.msTokenAcquiredAt = time.Time{}
-				}
-				c.mu.Unlock()
-				lastErr = fmt.Errorf("empty 200 response for %s (anti-bot)", path)
-				if attempt < maxRetries-1 {
-					select {
-					case <-time.After(delays[min(attempt, len(delays)-1)]):
-					case <-ctx.Done():
-						return nil, ctx.Err()
-					}
-				}
-				continue
-			}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		if len(body) == 0 {
+			// Empty 200 — anti-bot signal.
+			return nil, errEmpty200
+		}
 
-			var data map[string]any
-			if err := json.Unmarshal(body, &data); err != nil {
-				slog.Warn("Non-JSON 200 response", "path", path, "len", len(body))
-				return map[string]any{}, nil
-			}
+		var data map[string]any
+		if err := json.Unmarshal(body, &data); err != nil {
+			// Non-JSON 200 — usually a verify/captcha page.
+			slog.Warn("Non-JSON 200 response", "path", path, "len", len(body))
+			return nil, errNonJSON
+		}
 
-			c.mu.Lock()
-			c.empty200Streak = 0
-			c.mu.Unlock()
-
-			if isLoginRequired(data) {
-				code, _ := toInt(data["status_code"])
-				return nil, &LoginRequiredError{
-					StatusCode: code,
-					StatusMsg:  fmt.Sprintf("%v", data["status_msg"]),
-					Path:       path,
-				}
+		if isLoginRequired(data) {
+			code, _ := toInt(data["status_code"])
+			return nil, &LoginRequiredError{
+				StatusCode: code,
+				StatusMsg:  fmt.Sprintf("%v", data["status_msg"]),
+				Path:       path,
 			}
+		}
+		return data, nil
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Douyin's风控 responses (403 / verify page / empty 200) are intermittent,
+		// so retry a few times with backoff.
+		data, err := doGet()
+		if err == nil {
 			return data, nil
 		}
-
-		resp.Body.Close()
-		if resp.StatusCode < 500 && resp.StatusCode != 429 {
-			slog.Error("Request failed", "path", path, "status", resp.StatusCode)
-			return map[string]any{}, nil
+		lastErr = err
+		// Login-required is terminal — stop immediately.
+		if _, ok := err.(*LoginRequiredError); ok {
+			return nil, err
 		}
-		lastErr = fmt.Errorf("HTTP %d for %s", resp.StatusCode, path)
 
 		if attempt < maxRetries-1 {
 			select {
@@ -327,8 +291,27 @@ func (c *DouyinAPIClient) RequestJSON(ctx context.Context, path string, params u
 	}
 
 	slog.Error("Request failed after retries", "path", path, "error", lastErr)
+	if lastErr == nil {
+		lastErr = fmt.Errorf("request failed for %s", path)
+	}
 	return map[string]any{}, lastErr
 }
+
+// httpStatusError carries a non-200 HTTP status, marking whether it is retriable.
+type httpStatusError struct {
+	code      int
+	retriable bool
+	path      string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("HTTP %d for %s", e.code, e.path)
+}
+
+var (
+	errEmpty200 = fmt.Errorf("empty 200 response (anti-bot)")
+	errNonJSON  = fmt.Errorf("non-JSON 200 response (verify page)")
+)
 
 // normalizePagedResponse extracts items, has_more, and cursor from a raw response.
 func normalizePagedResponse(raw map[string]any, itemKeys ...string) *PagedResponse {
@@ -377,6 +360,9 @@ func normalizePagedResponse(raw map[string]any, itemKeys ...string) *PagedRespon
 
 // GetVideoDetail fetches details for a single video.
 func (c *DouyinAPIClient) GetVideoDetail(ctx context.Context, awemeID string) (map[string]any, error) {
+	var lastStatus int
+	var lastMsg string
+	gotResponse := false
 	for _, aid := range []string{"6383", "1128"} {
 		params := c.defaultQuery()
 		params.Set("aweme_id", awemeID)
@@ -387,13 +373,32 @@ func (c *DouyinAPIClient) GetVideoDetail(ctx context.Context, awemeID string) (m
 			return nil, err
 		}
 		if len(data) == 0 {
+			// Empty 200 (anti-bot) — try the other aid.
 			continue
 		}
+		gotResponse = true
 		if detail, ok := data["aweme_detail"].(map[string]any); ok && detail != nil {
 			return detail, nil
 		}
+		// aweme_detail absent — capture Douyin's own status for diagnostics.
+		if sc, ok := toInt(data["status_code"]); ok {
+			lastStatus = sc
+		}
+		if sm := strings.TrimSpace(fmt.Sprintf("%v", data["status_msg"])); sm != "" && sm != "<nil>" {
+			lastMsg = sm
+		}
+		slog.Warn("aweme_detail absent in detail response",
+			"aweme_id", awemeID, "aid", aid,
+			"status_code", data["status_code"], "status_msg", data["status_msg"])
 	}
-	return nil, nil
+
+	if !gotResponse {
+		return nil, fmt.Errorf("详情接口无响应(疑似风控/网络,多次空 200)")
+	}
+	if lastStatus != 0 || lastMsg != "" {
+		return nil, fmt.Errorf("抖音拒绝: status_code=%d %s(Cookie 可能过期或被风控)", lastStatus, lastMsg)
+	}
+	return nil, fmt.Errorf("响应中无 aweme_detail(视频可能已删除/私密)")
 }
 
 // GetUserPost fetches a page of a user's posted videos.

@@ -49,8 +49,8 @@ async function save() {
     </template>
 
     <p class="desc">
-      填入部署了下载服务(Python <code>--serve</code>)的地址,例如
-      <code>https://your-nas.example.com:8000</code>。
+      填入部署了下载服务(Go server)的地址,例如
+      <code>https://your-nas.example.com:8000</code>。<b>APP 必须用 HTTPS</b>。
     </p>
 
     <el-input

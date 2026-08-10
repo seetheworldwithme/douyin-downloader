@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 512 512">
+  <!-- 安卓自适应图标背景层:全出血渐变,无 glyph、无圆角(由系统 mask 裁切) -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#3ce8a6"/>
@@ -9,12 +10,6 @@
       <stop offset="60%" stop-color="#ffffff" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <!-- maskable:背景全出血(无圆角),glyph 缩到中心安全区(~72%) -->
   <rect width="512" height="512" fill="url(#bg)"/>
   <rect width="512" height="512" fill="url(#glow)"/>
-  <g fill="#ffffff" transform="translate(256 256) scale(0.72) translate(-256 -275)">
-    <rect x="222" y="104" width="68" height="156" rx="34"/>
-    <polygon points="256,380 150,250 362,250"/>
-    <rect x="138" y="402" width="236" height="44" rx="22"/>
-  </g>
 </svg>

@@ -1,15 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#4ed69a"/>
-      <stop offset="100%" stop-color="#2c8f6a"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3ce8a6"/>
+      <stop offset="100%" stop-color="#129a66"/>
     </linearGradient>
+    <radialGradient id="glow" cx="0.32" cy="0.20" r="0.75">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.25"/>
+      <stop offset="60%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
   </defs>
   <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <!-- 下载箭头 -->
+  <rect width="512" height="512" rx="112" fill="url(#glow)"/>
+  <!-- 下载箭头:圆头箭杆 + 三角箭头 + 托盘 -->
   <g fill="#ffffff">
-    <path d="M256 96 L336 176 L288 176 L288 288 L224 288 L224 176 L176 176 Z"/>
-    <!-- 托盘 -->
-    <path d="M152 320 L360 320 L360 360 Q360 392 328 392 L184 392 Q152 392 152 360 Z"/>
+    <rect x="222" y="104" width="68" height="156" rx="34"/>
+    <polygon points="256,380 150,250 362,250"/>
+    <rect x="138" y="402" width="236" height="44" rx="22"/>
   </g>
 </svg>

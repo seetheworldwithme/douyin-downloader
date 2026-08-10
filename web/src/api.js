@@ -1,9 +1,16 @@
-// 服务器基址:网页同源时留空(相对 /api/v1),PWA / 自托管 / APK 时填完整地址。
-// 用 localStorage 持久化,APK 首启在 SettingsCard 里设置。
+// 服务器基址:网页同源时留空(相对 /api/v1),自托管前端手动填完整地址。
+// 原生 APK 默认直接用线上地址(下方 DEFAULT_SERVER),首启无需配置;
+// 自托管用户仍可在「设置」里改成自己的地址覆盖它。
+import { Capacitor } from '@capacitor/core'
+
+const DEFAULT_SERVER = 'https://douyin.xuziyue.work'
 const SERVER_KEY = 'dd_server'
 
 export function getServerBase() {
-  return (localStorage.getItem(SERVER_KEY) || '').replace(/\/+$/, '')
+  const saved = (localStorage.getItem(SERVER_KEY) || '').trim().replace(/\/+$/, '')
+  if (saved) return saved
+  // APK 未配置时回退到线上默认;网页同源时留空
+  return Capacitor.isNativePlatform() ? DEFAULT_SERVER : ''
 }
 
 export function setServerBase(value) {

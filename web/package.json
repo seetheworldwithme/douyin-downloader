@@ -7,9 +7,12 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "icons": "mkdir -p public/icons && rsvg-convert -w 192 -h 192 public/icon.svg -o public/icons/pwa-192.png && rsvg-convert -w 512 -h 512 public/icon.svg -o public/icons/pwa-512.png && rsvg-convert -w 512 -h 512 public/icon-maskable.svg -o public/icons/maskable-512.png",
+    "icons": "mkdir -p public/icons assets && rsvg-convert -w 192 -h 192 public/icon.svg -o public/icons/pwa-192.png && rsvg-convert -w 512 -h 512 public/icon.svg -o public/icons/pwa-512.png && rsvg-convert -w 512 -h 512 public/icon-maskable.svg -o public/icons/maskable-512.png && rsvg-convert -w 1024 -h 1024 public/icon.svg -o assets/icon.png && rsvg-convert -w 1024 -h 1024 public/icon-foreground.svg -o assets/icon-foreground.png && rsvg-convert -w 1024 -h 1024 public/icon-background.svg -o assets/icon-background.png",
+    "build:native": "BUILD_TARGET=capacitor vite build",
+    "assets:android": "npx @capacitor/assets generate --android",
     "cap:add:android": "cap add android",
-    "cap:sync": "cap sync android"
+    "cap:sync": "cap sync android",
+    "cap:open": "cap open android"
   },
   "dependencies": {
     "@capacitor/android": "^7.1.0",

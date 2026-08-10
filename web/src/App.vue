@@ -94,6 +94,10 @@ onBeforeUnmount(() => {
 * {
   box-sizing: border-box;
 }
+/* 触摸目标放大到安卓 Material 推荐的 ≥40dp;不影响 header 里的 text 按钮 */
+.el-button:not(.is-text):not(.is-link) {
+  min-height: 40px;
+}
 html,
 body {
   margin: 0;
@@ -103,16 +107,22 @@ body {
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   color: #303133;
 }
+/* dvh:移动端动态工具栏下更可靠;100vh 在 WebView 里会偏大 */
 .app {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
+/* 顶部留状态栏、左右留圆角/刘海安全区(安卓 15 edge-to-edge) */
 .app-header {
   background: #fff;
   border-bottom: 1px solid #ebeef5;
-  padding: 0 24px;
-  height: 60px;
+  padding-top: env(safe-area-inset-top);
+  padding-left: max(24px, env(safe-area-inset-left));
+  padding-right: max(24px, env(safe-area-inset-right));
+  padding-bottom: 0;
+  height: calc(60px + env(safe-area-inset-top));
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -159,14 +169,19 @@ body {
   max-width: 760px;
   width: 100%;
   margin: 0 auto;
-  padding: 24px;
+  padding-top: 24px;
+  /* 底部留出手势导航条安全区 */
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+  padding-left: max(24px, env(safe-area-inset-left));
+  padding-right: max(24px, env(safe-area-inset-right));
   display: flex;
   flex-direction: column;
   gap: 24px;
 }
 @media (max-width: 600px) {
   .app-header {
-    padding: 0 12px;
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
   }
   .title {
     font-size: 15px;

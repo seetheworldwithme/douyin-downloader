@@ -56,8 +56,8 @@ Non-`/api/` paths fall back to the SPA `index.html`.
 - Lint/build: `cd server-go && go vet ./... && go build ./...`.
 
 ### Deploy
-- One command from repo root: `bash docker/deploy.sh` (SSH deploys to the server).
-- `docker/start.sh` rebuilds frontend, recompiles the Go binary, restarts it, restarts nginx container.
+- On the server, one command from repo root: `bash start.sh` (runs directly on the server, no SSH wrapper).
+- `start.sh` rebuilds frontend, recompiles the Go binary, restarts it, restarts nginx container.
 - Edge-nginx terminates TLS; `/` → nginx static (8083), `/api/` → Go server (8000).
 
 ### Scope note

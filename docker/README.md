@@ -20,30 +20,31 @@
 
 | 文件 | 作用 |
 |------|------|
-| `start.sh` | **服务器端**:构建前端 + 编译起 Go 后端 + 起前端容器 |
-| `deploy.sh` | **本地端**:SSH 拉代码 + 同步密钥 + 跑 start.sh + 落 edge-nginx 配置并 reload |
+| `start.sh`(仓库根) | **服务器端一键**:构建前端 + 编译起 Go 后端 + 起前端容器 |
 | `docker-compose.yml` | 前端官方 nginx 镜像,`127.0.0.1:8083:80`,挂载 `server/static` + `nginx.conf` |
 | `nginx.conf` | 前端容器纯静态 server block(SPA + 缓存,不处理 /api) |
 | `edge-proxy/douyin.xuziyue.work.conf` | **edge-nginx 的 server block**:443 + 证书 + `/`→8083 + `/api/`→8000 |
-| `.env.example` | `.env` 模板(SSH/地址,勿提交) |
 
 ## 一次性准备(服务器 `101.33.79.160`)
 
 1. **Docker**(带 compose 插件)+ `sudo usermod -aG docker ubuntu`(重新登录生效)。
-2. **Node**(前端构建用)。
+2. **Node**(≥ 20,前端构建用)。
 3. **Go**(≥ 1.26,后端编译用):见 https://go.dev/dl/ 。
-4. **clone 代码**到 `code_dir`;**DNS** `douyin.xuziyue.work` → 服务器 IP;证书已存在
+4. **clone 代码**到服务器;**DNS** `douyin.xuziyue.work` → 服务器 IP;证书已存在
    (`/etc/letsencrypt/live/douyin.xuziyue.work/`)。
 5. **证书续期切 webroot**(一次性,见下「证书续期」)。
 
-## 部署(本地一条命令)
+## 部署(服务器上一条命令)
 
-仓库根 `.env` 按模板填好后:
+在服务器上(代码已 clone 到本地),仓库根执行:
 
 ```bash
-bash docker/deploy.sh
+git pull          # 拉最新代码(可选)
+bash start.sh
 ```
 
+`start.sh` 会:① `npm run build` 构建前端 → `server/static`;② 编译并后台启动 Go 后端
+(`127.0.0.1:8000`);③ `docker compose up -d` 启动前端 nginx 容器(`127.0.0.1:8083`)。
 完成后访问 `https://douyin.xuziyue.work/`。
 
 ## 证书续期(切 webroot,一次性)
@@ -62,19 +63,20 @@ dry-run 通过即说明续期链路正常。三个证书都可照此切 webroot�
 ## 日常
 
 ```bash
-# 更新代码后重新部署
-bash docker/deploy.sh
+# 更新代码后重新部署(服务器上)
+git pull && bash start.sh
 
 # 后端日志
 tail -f logs/backend.log
 
 # 停止
-docker compose -f docker/docker-compose.yml down
+docker compose -p douyin -f docker/docker-compose.yml down
 kill "$(cat .backend.pid)"
 ```
 
 ## 备注
 
-- 前端改了只需 `npm run build` + 重启前端容器(`deploy.sh` 自动完成);后端改了重启后端进程。
-- edge-nginx 配置变更只在 `conf.d/` 新增/覆盖 `douyin.xuziyue.work.conf`,**不动 `edge.conf`**;
-  `deploy.sh` 会先 `nginx -t` 校验全部配置再 reload,失败不 reload,不影响其他站。
+- 前端或后端改了,服务器上 `bash start.sh` 即可重新构建并重启(后端重启会先 kill 旧 PID)。
+- **edge-nginx 是独立仓库**(`/home/ubuntu/code/edge-proxy/`),`start.sh` 不管理它。若改了
+  `docker/edge-proxy/douyin.xuziyue.work.conf`,需手动复制到 edge-nginx 的 `conf.d/` 再 reload:
+  `docker exec edge-nginx nginx -t && docker exec edge-nginx nginx -s reload`(先 `-t` 校验,失败不 reload)。

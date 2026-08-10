@@ -74,13 +74,13 @@ cd ../server-go && go build -o ../.bin/server ./cmd/server
 
 ## 部署
 
-仓库根 `.env`（参考 `docker/.env.example` 填服务器 SSH 信息）配置好后：
+在服务器上（代码已 clone 到本地），仓库根执行：
 
 ```bash
-bash docker/deploy.sh
+bash start.sh
 ```
 
-`docker/start.sh` 会：① 构建前端 → `server/static`；② 编译并后台启动 Go 后端（`127.0.0.1:8000`）；③ 启动 nginx 静态容器（`127.0.0.1:8083`）。对外 HTTPS 由 edge-nginx 终结：`/` → nginx，`/api/` → Go 后端。
+`start.sh` **直接在服务器上运行**（无 SSH 包装），会：① 构建前端 → `server/static`；② 编译并后台启动 Go 后端（`127.0.0.1:8000`）；③ 启动 nginx 静态容器（`127.0.0.1:8083`）。对外 HTTPS 由 edge-nginx 终结：`/` → nginx，`/api/` → Go 后端。edge-nginx 是独立仓库，本脚本不管理。
 
 详见 [`docker/README.md`](docker/README.md)。
 
@@ -90,7 +90,8 @@ bash docker/deploy.sh
 server-go/          Go 后端（cmd/server + internal/{auth,config,control,core,server,storage,utils}）
 web/                Vue 前端（构建到 server/static）
 server/static/      前端构建产物（Go SPA 兜底 + nginx 托管）
-docker/             部署脚本与 nginx / edge-proxy 配置
+start.sh            服务器一键启动（构建前端 + Go 后端 + nginx 容器）
+docker/             nginx / edge-proxy 配置（无部署脚本，用根 start.sh）
 config.yml          运行配置（gitignored）
 config.example.yml  配置模板
 .cookies.json       Cookie 凭据（gitignored）

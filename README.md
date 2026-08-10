@@ -74,13 +74,13 @@ Env overrides (prefix `DOUYIN_`): `DOUYIN_COOKIE`, `DOUYIN_PATH`, `DOUYIN_THREAD
 
 ## Deploy
 
-Fill in `.env` at the repo root from `docker/.env.example` (server SSH info), then:
+On the server (where the repo is cloned), from the repo root:
 
 ```bash
-bash docker/deploy.sh
+bash start.sh
 ```
 
-`docker/start.sh` will: ① build the frontend → `server/static`; ② compile and start the Go backend in the background (`127.0.0.1:8000`); ③ start the nginx static container (`127.0.0.1:8083`). Public HTTPS is terminated by edge-nginx: `/` → nginx, `/api/` → Go backend.
+`start.sh` runs **on the server directly** (no SSH wrapper). It will: ① build the frontend → `server/static`; ② compile and start the Go backend in the background (`127.0.0.1:8000`); ③ start the nginx static container (`127.0.0.1:8083`). Public HTTPS is terminated by edge-nginx: `/` → nginx, `/api/` → Go backend. Edge-nginx is a separate repo and is not managed by this script.
 
 See [`docker/README.md`](docker/README.md) for details.
 
@@ -90,7 +90,8 @@ See [`docker/README.md`](docker/README.md) for details.
 server-go/          Go backend (cmd/server + internal/{auth,config,control,core,server,storage,utils})
 web/                Vue frontend (builds to server/static)
 server/static/      frontend build output (Go SPA fallback + nginx)
-docker/             deploy scripts and nginx / edge-proxy config
+start.sh            one-command server bring-up (frontend build + Go backend + nginx container)
+docker/             nginx / edge-proxy config (no deploy scripts — use root start.sh)
 config.yml          runtime config (gitignored)
 config.example.yml  config template
 .cookies.json       cookie credentials (gitignored)

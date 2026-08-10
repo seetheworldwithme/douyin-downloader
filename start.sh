@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# 一键启动抖音下载器(在服务器上执行),参照 calendar-site 模式:
+# 一键启动抖音下载器(在服务器上直接执行:`bash start.sh`):
 #   1) npm run build 打包前端 → server/static
 #   2) 编译 Go 后端(server-go)并在宿主机后台启动,监听 127.0.0.1:8000
 #   3) docker compose 启动官方 nginx 镜像(127.0.0.1:8083,纯静态托管前端)
 # 对外 HTTPS 由 edge-nginx 负责(见 docker/edge-proxy/douyin.xuziyue.work.conf)。
-#
-# 通常由 docker/deploy.sh 经 SSH 调用;也可在服务器上直接 `bash docker/start.sh`。
+# 访问:https://douyin.xuziyue.work/  (/ → nginx 前端,/api/ → Go 后端)
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"
 
 SERVE_PORT="${SERVE_PORT:-8000}"
@@ -88,6 +87,6 @@ else echo "  找不到 docker compose(v2 插件或 v1 docker-compose)"; exit 1; 
 echo
 echo "✓ 启动完成。"
 echo "  - 前端容器: douyin-web @ 127.0.0.1:8083"
-echo "  - 后端 API: 127.0.0.1:$SERVE_PORT"
+echo "  - 后端 API: 127.0.0.1:$SERVE_PORT (日志: logs/backend.log)"
 echo "  - 对外(经 edge-nginx): https://douyin.xuziyue.work/"
-echo "  - 停止: docker-compose -p douyin -f docker/docker-compose.yml down ; kill \$(cat .backend.pid)"
+echo "  - 停止: ${COMPOSE[*]} -p douyin -f docker/docker-compose.yml down ; kill \$(cat .backend.pid)"

@@ -1,642 +1,101 @@
-# 抖音下载器 V2.0（Douyin Downloader）
+# 抖音下载器（Douyin Downloader）
 
-<p align="center">
-  <img src="https://socialify.git.ci/jiji262/douyin-downloader/image?custom_description=%E6%8A%96%E9%9F%B3%E6%89%B9%E9%87%8F%E4%B8%8B%E8%BD%BD%E5%B7%A5%E5%85%B7%EF%BC%8C%E5%8E%BB%E6%B0%B4%E5%8D%B0%EF%BC%8C%E6%94%AF%E6%8C%81%E8%A7%86%E9%A2%91%E3%80%81%E5%9B%BE%E9%9B%86%E3%80%81%E4%BD%9C%E8%80%85%E4%B8%BB%E9%A1%B5%E6%89%B9%E9%87%8F%E4%B8%8B%E8%BD%BD%E3%80%82&description=1&font=Jost&forks=1&logo=https%3A%2F%2Fraw.githubusercontent.com%2Fjiji262%2Fdouyin-downloader%2Frefs%2Fheads%2Fmain%2Fimg%2Flogo.png&name=1&owner=1&pattern=Circuit+Board&pulls=1&stargazers=1&theme=Light" alt="douyin-downloader" width="820" />
-</p>
+一个基于 **Go 后端 + Vue 前端** 的抖音无水印视频下载器：粘贴抖音链接，在线解析并流式下载视频，无需在服务器落盘。
 
-一个面向实用场景的抖音下载工具，支持视频、图文、合集、音乐、收藏夹等多种类型下载，以及作者主页批量下载，默认带进度展示、重试、数据库去重、下载完整性校验和浏览器兜底能力。
+前端为可安装的 PWA，并可通过 Capacitor 打包成 Android APK。
 
-## 桌面版（Douzy）
+## 功能
 
-基于同一套后端打造的桌面客户端，为抖音、TikTok、YouTube 提供独立工作台。粘贴链接即可开始下载，同步账号内容，可视化跟踪任务，并在本地档案中统一管理已下载作品。
+- 粘贴抖音链接（视频 / 图文 / 短链 `v.douyin.com`）→ 解析标题与无水印视频源
+- 流式下载：后端中转视频流，浏览器直接另存为文件，服务器不保存视频
+- 登录鉴权：用户名 / 密码换取 token，接口需带 token 访问
+- 可配置代理、视频清晰度、Cookie
+- PWA：可添加到主屏幕，离线壳 + 实时数据；支持打包 APK
 
-- **三平台工作台：** 抖音视频、图文、主页与合集；TikTok 视频、图集与主页；YouTube 视频、Shorts、频道与播放列表
-- **账号内容：** 同步抖音关注、收藏夹、收藏合集与喜欢列表
-- **可视化管理：** 多链接队列、任务状态与重试、本地下载档案、筛选与快速重新下载
+## 技术栈
 
-> **内测中：** 桌面版目前处于内测期，如需使用，请到 [Releases](https://github.com/jiji262/douyin-downloader/releases) 页面下载安装文件。
-
-| **抖音链接下载** | **TikTok 下载工作台** | **YouTube 工作台** |
-|:---:|:---:|:---:|
-| ![Douzy 抖音链接下载工作台](img/desktop/001.png) | ![Douzy TikTok 下载工作台](img/desktop/002.png) | ![Douzy YouTube 工作台](img/desktop/003.png) |
-| 粘贴视频、图文、主页或合集链接，一键开始下载。 | 无需登录即可下载公开视频、图集与主页内容。 | 扫描视频、Shorts、频道与播放列表，可配置视频、MP3 或字幕下载。 |
-| **关注管理** | **收藏与喜欢** | **任务中心** |
-| ![Douzy 关注管理](img/desktop/004.png) | ![Douzy 收藏与喜欢](img/desktop/005.png) | ![Douzy 任务中心](img/desktop/006.png) |
-| 同步博主、筛选新作品、添加备注，并直接下载。 | 浏览当前抖音账号的收藏视频、收藏合集与喜欢作品。 | 查看任务结果、重试失败项，并快速打开输出目录。 |
-
-_截图来自当前桌面端 `main` 构建；为保护隐私，界面内容使用演示数据。_
-
-## 功能概览
-
-### 已支持
-
-| 功能 | 说明 |
-|------|------|
-| 单个视频下载 | `/video/{aweme_id}` |
-| 单个图文下载 | `/note/{note_id}`、`/gallery/{note_id}` |
-| 单个合集下载 | `/collection/{mix_id}`、`/mix/{mix_id}` |
-| 单个音乐下载 | `/music/{music_id}`（优先原声文件，缺失时回退到该音乐下首条作品） |
-| 短链自动解析 | `https://v.douyin.com/...`、`v.iesdouyin.com`，含裸 host |
-| 用户主页批量下载 | `/user/{sec_uid}` + `mode: [post, like, mix, music]` |
-| 当前登录账号收藏夹下载 | `/user/self?showTab=favorite_collection` + `mode: [collect, collectmix]` |
-| 无水印优先 | 自动选择无水印视频源 |
-| 最高清自动挑选 | 基于 `video.bit_rate` 数组自动选最高码率（视频 + 实况图生效） |
-| **直播录制** | `live.douyin.com/{room_id}` → FLV/HLS，主播下播时保留已录数据 |
-| **评论采集** | 按作品抓评论（可含二级回复），输出 `*_comments.json` |
-| **热搜榜 + 关键词搜索** | `--hot-board [N]` / `--search "关键词"`，结果落 JSONL |
-| **REST API 服务模式** | `--serve --serve-port 8000`（可选 `fastapi + uvicorn`） |
-| **完成通知推送** | 下载完成后推 Bark / Telegram / Webhook |
-| 附加资源下载 | 封面、音乐、头像、JSON 元数据 |
-| 视频转写 | 可选功能，调用 OpenAI Transcriptions API |
-| 并发下载 | 可配置并发数，默认 5 |
-| 失败重试 | 指数退避重试（1s, 2s, 5s） |
-| 速率限制 | 默认 2 请求/秒 |
-| SQLite 去重 | 数据库 + 本地文件双重去重 |
-| 增量下载 | `increase.post/like/mix/music` |
-| 时间过滤 | `start_time` / `end_time` |
-| 浏览器兜底 | 翻页受限时启动浏览器，支持人工过验证码 |
-| 下载完整性校验 | Content-Length 比对，不完整文件自动清理并重试 |
-| 进度条展示 | Rich 进度条，支持 `progress.quiet_logs` 静默模式 |
-| Docker 部署 | 提供 Dockerfile |
-| CI/CD | GitHub Actions 自动测试和 lint |
-
-### 限制说明
-
-- 浏览器兜底当前仅针对 `post` 完整验证，`like/mix/music` 主要依赖 API 正常分页
-- `number.allmix` / `increase.allmix` 作为兼容别名保留，运行时会归一化到 `mix`
-- `collect` / `collectmix` 当前仅支持当前已登录 Cookie 对应账号
-- `collect` / `collectmix` 必须单独使用，不能和 `post` / `like` / `mix` / `music` 混用
-- `increase` 当前仅支持 `post` / `like` / `mix` / `music`；收藏夹模式不支持增量截断
-- 直播录制 FLV 可直接播放；HLS 源只保存 playlist 文件（需要用 ffmpeg 后处理）
-- webcast 直播接口未覆盖所有场景，视为 experimental
+| 层 | 技术 | 位置 |
+|----|------|------|
+| 后端 | Go（`net/http`，纯 Go SQLite `modernc.org/sqlite`，无需 CGO） | `server-go/` |
+| 前端 | Vue 3 + Vite + vite-plugin-pwa | `web/` |
+| 前端构建产物 | 静态文件，由 Go 服务 SPA 兜底托管，也由 nginx 容器托管 | `server/static/` |
+| 配置 | YAML（`config.yml`） | 仓库根 |
+| 部署 | edge-nginx（TLS 终结）+ nginx 静态容器 + 宿主机 Go 进程 | `docker/` |
 
 ## 快速开始
 
-### 1) 环境准备
+### 前置依赖
+- Go ≥ 1.26
+- Node.js ≥ 20（前端构建）
 
-- Python 3.8+
-- macOS / Linux / Windows
-
-### 2) 安装依赖
-
+### 本地开发
 ```bash
-pip install -r requirements.txt
-```
-
-如需浏览器兜底或自动获取 Cookie：
-
-```bash
-pip install playwright
-python -m playwright install chromium
-```
-
-### 3) 复制配置
-
-```bash
-cp config.example.yml config.yml
-```
-
-### 4) 获取 Cookie（推荐自动方式）
-
-```bash
-python -m tools.cookie_fetcher --config config.yml
-```
-
-登录抖音后回到终端按 Enter，程序会自动写入配置。
-
-### 5) Docker 部署（可选）
-
-```bash
-docker build -t douyin-downloader .
-docker run -v $(pwd)/config.yml:/app/config.yml -v $(pwd)/Downloaded:/app/Downloaded douyin-downloader
-```
-
-## 最小可用配置
-
-```yaml
-link:
-  - https://www.douyin.com/user/MS4wLjABAAAAxxxx
-
-path: ./Downloaded/
-mode:
-  - post
-
-number:
-  post: 0
-  collect: 0
-  collectmix: 0
-
-thread: 5
-retry_times: 3
-proxy: ""
-database: true
-database_path: dy_downloader.db
-
-progress:
-  quiet_logs: true
-
-cookies:
-  msToken: ""
-  ttwid: YOUR_TTWID
-  odin_tt: YOUR_ODIN_TT
-  passport_csrf_token: YOUR_CSRF_TOKEN
-  sid_guard: ""
-
-browser_fallback:
-  enabled: true
-  headless: false
-  max_scrolls: 240
-  idle_rounds: 8
-  wait_timeout_seconds: 600
-
-transcript:
-  enabled: false
-  model: gpt-4o-mini-transcribe
-  output_dir: ""
-  response_formats: ["txt", "json"]
-  api_url: https://api.openai.com/v1/audio/transcriptions
-  api_key_env: OPENAI_API_KEY
-  api_key: ""
-```
-
-## 使用方式
-
-### 使用配置文件运行
-
-```bash
-python run.py -c config.yml
-```
-
-### 命令行追加参数
-
-```bash
-python run.py -c config.yml \
-  -u "https://www.douyin.com/video/7604129988555574538" \
-  -t 8 \
-  -p ./Downloaded
-```
-
-### 参数说明
-
-| 参数 | 说明 |
-|------|------|
-| `-u, --url` | 追加下载链接（可重复传入） |
-| `-c, --config` | 指定配置文件（默认 `config.yml`） |
-| `-p, --path` | 指定下载目录 |
-| `-t, --thread` | 指定并发数 |
-| `--show-warnings` | 显示 warning/error 日志 |
-| `-v, --verbose` | 显示 info/warning/error 日志 |
-| `--hot-board [N]` | 拉取抖音热搜榜并导出 JSONL，可选上限 N |
-| `--search KEYWORD` | 按关键词搜索作品并导出 JSONL |
-| `--search-max N` | `--search` 场景下最多拉取条数（默认 50） |
-| `--serve` | 以 REST API 服务模式运行（需要 `pip install fastapi uvicorn`） |
-| `--serve-host HOST` | REST 服务监听地址（默认 127.0.0.1） |
-| `--serve-port PORT` | REST 服务监听端口（默认 8000） |
-| `--version` | 显示版本号 |
-
-## 典型场景
-
-### 下载单个视频
-
-```yaml
-link:
-  - https://www.douyin.com/video/7604129988555574538
-```
-
-### 下载单个图文
-
-```yaml
-link:
-  - https://www.douyin.com/note/7341234567890123456
-```
-
-### 下载单个合集
-
-```yaml
-link:
-  - https://www.douyin.com/collection/7341234567890123456
-```
-
-### 下载单个音乐
-
-```yaml
-link:
-  - https://www.douyin.com/music/7341234567890123456
-```
-
-### 批量下载作者主页作品
-
-```yaml
-link:
-  - https://www.douyin.com/user/MS4wLjABAAAAxxxx
-mode:
-  - post
-number:
-  post: 50
-```
-
-### 批量下载作者点赞作品
-
-```yaml
-link:
-  - https://www.douyin.com/user/MS4wLjABAAAAxxxx
-mode:
-  - like
-number:
-  like: 0    # 0 表示全量下载
-```
-
-### 同时下载多种模式
-
-```yaml
-link:
-  - https://www.douyin.com/user/MS4wLjABAAAAxxxx
-mode:
-  - post
-  - like
-  - mix
-  - music
-```
-
-跨模式自动去重：同一个 aweme_id 在不同模式下不会重复下载。
-
-### 批量下载当前登录账号收藏夹作品
-
-```yaml
-link:
-  - https://www.douyin.com/user/self?showTab=favorite_collection
-mode:
-  - collect
-number:
-  collect: 0
-```
-
-### 批量下载当前登录账号收藏合集
-
-```yaml
-link:
-  - https://www.douyin.com/user/self?showTab=favorite_collection
-mode:
-  - collectmix
-number:
-  collectmix: 0
-```
-
-### 录制直播（实验性）
-
-```yaml
-link:
-  - https://live.douyin.com/123456789   # 也支持 /follow/live/{room_id}
-live:
-  max_duration_seconds: 3600   # 0 = 录到主播下播
-  chunk_size: 65536
-  idle_timeout_seconds: 30
-```
-
-录制的 FLV 会保存在 `Downloaded/{作者}/live/` 下，并附带 `*_room.json` 直播间元数据快照。
-主播下播、网络空闲或 Ctrl+C 中断时，**已录制的字节会被保留**（.tmp 文件自动提升为正式文件）。
-
-### 采集作品评论
-
-```yaml
-comments:
-  enabled: true
-  include_replies: false   # 设为 true 会多拉每条评论的二级回复（额外请求量）
-  max_comments: 500        # 0 = 不限
-  page_size: 20
-```
-
-会在媒体文件旁生成 `{date}_{title}_{aweme_id}_comments.json`。
-
-### 导出热搜榜快照
-
-```bash
-python run.py --hot-board 30 -p ./Downloaded
-# 输出：./Downloaded/hot_board/20260424_221530.jsonl
-```
-
-### 关键词搜索
-
-```bash
-python run.py --search "猫咪" --search-max 100 -p ./Downloaded
-# 输出：./Downloaded/search/猫咪_20260424_221530.jsonl
-```
-
-### 以 REST API 服务模式运行
-
-```bash
-pip install fastapi uvicorn       # 一次性可选依赖
-python run.py --serve --serve-port 8000
-```
-
-接口：
-
-| Method | Path | 说明 |
-|--------|------|------|
-| POST | `/api/v1/download` | 提交 `{"url": "..."}`，返回 `{job_id, status}` |
-| GET | `/api/v1/jobs/{job_id}` | 查询指定 job 的状态/计数 |
-| GET | `/api/v1/jobs` | 列出最近的 job（按 TTL + 容量剪裁） |
-| GET | `/api/v1/health` | 健康探针 |
-
-完成态的 job 会按 TTL（默认 24 小时）+ 最大数量（默认 500）自动剪裁；in-flight 的 job 永不被裁掉。
-可通过 `server.max_jobs` / `server.job_ttl_seconds` 调整。
-
-### Web 控制台（Vue 前端）
-
-项目自带一个基于 Vue 3 + Element Plus 的 Web 控制台，提供图形化的链接提交、批量下载和任务实时状态展示。前端构建产物由后端 FastAPI 一并托管，无需额外部署。
-
-**开发模式**（前后端分离联调，两个终端）：
-
-```bash
-# 终端 A：启动后端
-pip install fastapi uvicorn          # 一次性可选依赖
-python run.py --serve --serve-port 8000
-
-# 终端 B：启动前端开发服务器（Vite，默认 5173，自动代理 /api 到 8000）
+# 1) 后端
+cd server-go
+go build -o ../.bin/server ./cmd/server
+../.bin/server -config ../config.yml          # 默认监听 127.0.0.1:8000
+
+# 2) 前端(另一个终端,Vite dev server 代理 /api → :8000)
 cd web
 npm install
-npm run dev
-# 浏览器打开 http://localhost:5173
+npm run dev                                    # http://localhost:5173
 ```
 
-**生产模式**（单端口同时托管页面与 API）：
+### 生产构建
+```bash
+cd web && npm install && npm run build          # 产物输出到 ../server/static
+cd ../server-go && go build -o ../.bin/server ./cmd/server
+./.bin/server -config config.yml
+```
+
+## 配置（`config.yml`）
+
+复制 `config.example.yml` 为 `config.yml` 并填写。关键字段：
+
+| 字段 | 说明 |
+|------|------|
+| `cookie` / `cookies` | 抖音登录 Cookie（字符串或键值对）；也可设 `auto_cookie: true` 自动读取 `.cookies.json` / `config/cookies.json` |
+| `proxy` | HTTP 代理（如 `http://127.0.0.1:7890`） |
+| `video_quality` | 清晰度策略，默认 `highest` |
+| `auth.username` / `auth.password` | Web 登录账号密码 |
+| `auth.secret` | token 签名密钥；不填则每次启动随机生成（重启后旧 token 失效） |
+| `server.cors_origins` | 允许的前端来源 |
+
+环境变量覆盖（前缀 `DOUYIN_`）：`DOUYIN_COOKIE`、`DOUYIN_PATH`、`DOUYIN_THREAD`、`DOUYIN_PROXY`。
+
+## REST API（`/api/v1`）
+
+| 接口 | 方法 | 鉴权 | 说明 |
+|------|------|------|------|
+| `/health` | GET | — | 存活检查 |
+| `/login` | POST | — | 用户名密码 → token |
+| `/resolve` | POST | token | 解析链接 → 标题 / 文件名 / aweme_id |
+| `/stream` | GET | token | 流式下载视频（中转，不落盘） |
+
+## 部署
+
+仓库根 `.env`（参考 `docker/.env.example` 填服务器 SSH 信息）配置好后：
 
 ```bash
-cd web
-npm install && npm run build         # 产物输出到 server/static/
-cd ..
-python run.py --serve --serve-port 8000
-# 浏览器打开 http://127.0.0.1:8000
+bash docker/deploy.sh
 ```
 
-功能：
+`docker/start.sh` 会：① 构建前端 → `server/static`；② 编译并后台启动 Go 后端（`127.0.0.1:8000`）；③ 启动 nginx 静态容器（`127.0.0.1:8083`）。对外 HTTPS 由 edge-nginx 终结：`/` → nginx，`/api/` → Go 后端。
 
-- **智能链接提取**：可直接粘贴抖音 App「分享→复制」的整段文案，自动用正则提取其中的真实链接并批量提交、去重，忽略描述文字。
-- **可选保存目录**：提交区有「保存目录」输入框，默认 `Video/douyin`（仅作用于 web，不影响 CLI）；清空则回落到后端配置的 `path`。下载在后端执行，故此处为路径文本而非系统目录选择器。
-- **实时进度与网速**：任务列表为每个任务显示当前下载文件的字节进度条、瞬时网速、已下载/总字节数、作品计数（N/M）。移动端自动切换为卡片式布局。
-- **下载目录展示**：顶栏显示默认/当前保存目录，手机端同样可见。
-- 后端健康检查指示灯。
+详见 [`docker/README.md`](docker/README.md)。
 
-> 说明：直播录制（`live` 类型）使用独立的字节循环，其任务暂不显示字节进度条（会降级为只显示作品计数与终态）；视频/图文/音乐/封面/直播回放均支持字节级进度。
+## 项目结构
 
-> 共享逻辑同步：本次为支持字节进度，对 `storage/file_manager.py`（`download_file`/`_persist_stream` 增加可选 `progress_callback`）与 `core/downloader_base.py`（`ProgressReporter` 协议增加可选 `update_bytes`）做了**增量、向后兼容**的改动（默认 `None`，CLI 不受影响）。这两个文件为与桌面仓库 `douyin-downloader-desktop` 的共享逻辑，需同步过去。
-
-### 完成后发送通知
-
-```yaml
-notifications:
-  enabled: true
-  on_success: true
-  on_failure: true
-  providers:
-    - type: bark
-      url: https://api.day.app/YOUR_DEVICE_KEY
-      sound: bell
-    - type: telegram
-      bot_token: "123456:ABC..."
-      chat_id: "987654321"
-    - type: webhook                 # 企业微信/飞书/钉钉 bot URL 同样可用
-      url: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
-      extra_body:
-        msgtype: text
+```
+server-go/          Go 后端（cmd/server + internal/{auth,config,control,core,server,storage,utils}）
+web/                Vue 前端（构建到 server/static）
+server/static/      前端构建产物（Go SPA 兜底 + nginx 托管）
+docker/             部署脚本与 nginx / edge-proxy 配置
+config.yml          运行配置（gitignored）
+config.example.yml  配置模板
+.cookies.json       Cookie 凭据（gitignored）
 ```
 
-所有启用的 provider 会并发推送；单个 provider 失败不会阻塞主下载流程。
+## 说明
 
-### 增量下载（只下载新作品）
-
-```yaml
-increase:
-  post: true
-database: true    # 增量模式依赖数据库记录
-```
-
-### 全量抓取（不限制数量）
-
-```yaml
-number:
-  post: 0
-```
-
-## 可选功能：视频转写（transcript）
-
-当前实现仅对**视频作品**生效（图文不会生成转写）。
-
-### 1) 开启方式
-
-```yaml
-transcript:
-  enabled: true
-  model: gpt-4o-mini-transcribe
-  output_dir: ""        # 留空: 与视频同目录；非空: 镜像到指定目录
-  response_formats:
-    - txt
-    - json
-  api_key_env: OPENAI_API_KEY
-  api_key: ""           # 可直接填，或使用环境变量
-```
-
-推荐通过环境变量提供密钥：
-
-```bash
-export OPENAI_API_KEY="sk-xxxx"
-```
-
-### 2) 输出文件
-
-启用后会生成：
-
-- `xxx.transcript.txt`
-- `xxx.transcript.json`
-
-若 `database: true`，会在数据库 `transcript_job` 表记录状态（`success/failed/skipped`）。
-
-## 测试
-
-推荐使用：
-
-```bash
-python3 -m pytest -q
-```
-
-当前也支持直接运行：
-
-```bash
-pytest -q
-```
-
-## 关键配置项
-
-| 配置项 | 说明 |
-|--------|------|
-| `mode` | 支持 `post`/`like`/`mix`/`music`；当前登录收藏夹模式额外支持单独使用的 `collect`/`collectmix` |
-| `number.post/like/mix/music/collect/collectmix` | 各模式下载数量限制，0 为不限 |
-| `increase.post/like/mix/music` | 各模式增量开关 |
-| `start_time` / `end_time` | 时间过滤（格式 `YYYY-MM-DD`） |
-| `folderstyle` | 按作品维度创建子目录 |
-| `browser_fallback.*` | `post` 翻页受限时启用浏览器兜底 |
-| `progress.quiet_logs` | 进度阶段静默日志，减少刷屏 |
-| `transcript.*` | 视频下载后的可选转写 |
-| `proxy` | 为 API 请求和媒体下载设置 HTTP/HTTPS 代理，例如 `http://127.0.0.1:7890` |
-| `comments.*` | 按作品采集评论（默认关闭） |
-| `live.*` | 直播录制参数（max_duration_seconds / chunk_size / idle_timeout_seconds） |
-| `notifications.*` | 下载完成后 Bark/Telegram/Webhook 推送 |
-| `server.*` | REST API 服务调优（max_jobs、job_ttl_seconds） |
-| `database` | 启用 SQLite 去重和历史记录 |
-| `database_path` | SQLite 文件路径，默认在当前工作目录生成 `dy_downloader.db` |
-| `thread` | 并发下载数 |
-| `retry_times` | 失败重试次数 |
-
-## 输出目录
-
-默认 `folderstyle: true` 且 `database_path: dy_downloader.db` 时：
-
-```text
-工作目录/
-├── config.yml
-├── dy_downloader.db          # database: true 时默认生成在这里
-└── Downloaded/
-    ├── download_manifest.jsonl
-    └── 作者名/
-        ├── post/
-        │   └── 2024-02-07_作品标题_aweme_id/
-        │       ├── ...mp4
-        │       ├── ..._cover.jpg
-        │       ├── ..._music.mp3
-        │       ├── ..._data.json
-        │       ├── ..._avatar.jpg
-        │       ├── ...transcript.txt
-        │       └── ...transcript.json
-        ├── like/
-        │   └── ...
-        ├── mix/
-        │   └── ...
-        ├── music/
-        │   └── ...
-        ├── collect/
-        │   └── ...
-        └── collectmix/
-            └── ...
-Downloaded/
-├── download_manifest.jsonl
-├── dy_downloader.db          # database: true 时生成
-├── hot_board/                # 使用 --hot-board 时生成
-│   └── 20260424_221530.jsonl
-├── search/                   # 使用 --search 时生成
-│   └── 猫咪_20260424_221530.jsonl
-└── 作者名/
-    ├── post/
-    │   └── 2024-02-07_作品标题_aweme_id/
-    │       ├── ...mp4
-    │       ├── ..._cover.jpg
-    │       ├── ..._music.mp3
-    │       ├── ..._data.json
-    │       ├── ..._avatar.jpg
-    │       ├── ..._comments.json    # comments.enabled 时生成
-    │       ├── ...transcript.txt
-    │       └── ...transcript.json
-    ├── like/
-    │   └── ...
-    ├── mix/
-    │   └── ...
-    ├── music/
-    │   └── ...
-    └── live/                 # 录制直播时生成
-        └── 2026-04-24_2215_直播标题_房间号/
-            ├── ...flv
-            └── ..._room.json
-```
-
-## 重新下载
-
-程序通过**数据库记录 + 本地文件**双重检查判断是否跳过已下载内容。要重新下载，需要按以下方式清理数据：
-
-### 重新下载特定作品
-
-```bash
-# 删除本地文件（文件名中包含 aweme_id）
-rm -rf Downloaded/作者名/post/*_<aweme_id>/
-
-# 删除数据库记录
-sqlite3 dy_downloader.db "DELETE FROM aweme WHERE aweme_id = '<aweme_id>';"
-```
-
-### 重新下载某个作者的全部作品
-
-```bash
-rm -rf Downloaded/作者名/
-sqlite3 dy_downloader.db "DELETE FROM aweme WHERE author_name = '作者名';"
-```
-
-### 全部从零重新下载
-
-```bash
-rm -rf Downloaded/
-rm dy_downloader.db
-```
-
-> **注意：** 只删数据库不删文件不会触发重新下载——程序会扫描本地文件名中的 aweme_id 进行去重。只删文件不删数据库会触发重新下载（数据库中有记录但文件不存在时视为需要重新下载）。
-
-## 常见问题
-
-### 1) 只能抓到 20 条作品怎么办？
-
-这是翻页风控的常见现象。确保：
-
-- `browser_fallback.enabled: true`
-- `browser_fallback.headless: false`
-- 浏览器弹窗出现后手动完成验证，不要立即关闭窗口
-
-### 2) 进度条出现重复刷屏怎么办？
-
-默认 `progress.quiet_logs: true` 会在进度阶段静默日志。  
-调试时再临时加 `--show-warnings` 或 `-v`。
-
-### 3) Cookie 失效怎么办？
-
-重新执行：
-
-```bash
-python -m tools.cookie_fetcher --config config.yml
-```
-
-### 4) 为什么没有生成 transcript 文件？
-
-请依次检查：
-
-- `transcript.enabled` 是否为 `true`
-- 是否下载的是视频（图文不转写）
-- `OPENAI_API_KEY`（或 `transcript.api_key`）是否有效
-- `response_formats` 是否包含 `txt` 或 `json`
-
-### 5) 如何查看下载历史？
-
-```bash
-sqlite3 dy_downloader.db "SELECT aweme_id, title, author_name, datetime(download_time, 'unixepoch', 'localtime') FROM aweme ORDER BY download_time DESC LIMIT 20;"
-```
-
-## 沟通群
-
-<img src="./img/fuye.jpg" alt="qun" width="240" />
-
-点击链接加入群聊【QQ群】：[https://qm.qq.com/q/9xoNt8Wzv4](https://qm.qq.com/q/9xoNt8Wzv4)
-
-
-## 免责声明
-
-本项目仅用于技术研究、学习交流与个人数据管理。请在合法合规前提下使用：
-
-- 不得用于侵犯他人隐私、版权或其他合法权益
-- 不得用于任何违法违规用途
-- 使用者应自行承担因使用本项目产生的全部风险与责任
-- 如平台规则、接口策略变更导致功能失效，属于正常技术风险
-
-如果你继续使用本项目，即视为已阅读并同意上述声明。
-
-## 许可证
-
-本项目采用 MIT License，详见 [LICENSE](./LICENSE)。
-
-## 友情链接
-
-- [LINUX DO](https://linux.do/)
+本仓库的 Go 后端目前只实现「单视频解析 + 流式下载」的 Web 能力。早期 Python 版本的 CLI 批量下载模式（用户主页 / 点赞 / 合集 / 音乐 / 直播录制 / 评论采集 / 转写等）未迁移。如需恢复，可在 `server-go/internal/server/` 下新增接口。

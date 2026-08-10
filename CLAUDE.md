@@ -2,8 +2,10 @@
 
 Read `AGENTS.md` for the full project rules.
 
-## Shared Logic With Desktop
+## Architecture
 
-- This project shares Python backend logic with `/Users/crimson/codes/douyin/douyin-downloader-desktop`.
-- When fixing shared logic in `auth/`, `cli/`, `config/`, `control/`, `core/`, `storage/`, `tools/`, `utils/`, or shared tests, apply the equivalent fix in both projects unless the difference is explicitly desktop-only or CLI-only.
-- Before finishing a shared-logic fix, compare the touched shared files against the sibling project and either keep them identical or document the intentional divergence.
+- **Backend**: Go server in `server-go/` (module `github.com/xuziyue/douyin-downloader`).
+  Entry point `server-go/cmd/server/main.go`; REST API under `server-go/internal/server/`.
+- **Frontend**: Vue + Vite app in `web/`, built output lands in `server/static/`
+  (served by the Go server's SPA fallback and by the nginx container in `docker/`).
+- **Config**: `config.yml` (YAML) + `.cookies.json` / `config/cookies.json` — read by the Go server.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 一键启动抖音下载器(在服务器上执行),参照 calendar-site 模式:
 #   1) npm run build 打包前端 → server/static
-#   2) 用 conda env `dogs` 在宿主机后台启动后端(run.py --serve),监听 127.0.0.1:8000
+#   2) 编译 Go 后端(server-go)并在宿主机后台启动,监听 127.0.0.1:8000
 #   3) docker compose 启动官方 nginx 镜像(127.0.0.1:8083,纯静态托管前端)
 # 对外 HTTPS 由 edge-nginx 负责(见 docker/edge-proxy/douyin.xuziyue.work.conf)。
 #
@@ -11,8 +11,8 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
-CONDA_ENV="${CONDA_ENV:-dogs}"
 SERVE_PORT="${SERVE_PORT:-8000}"
+GO_VERSION_MIN="1.26"  # go.mod 要求 go 1.26.4
 
 echo "== [1/3] 构建前端 (npm run build) =="
 # PWA 的 service worker 压缩需要 Node 20+(全局 crypto);非交互 shell 不会自动激活 nvm,
@@ -41,38 +41,36 @@ npm run build
 cd "$REPO_DIR"
 echo "  前端产物: $REPO_DIR/server/static"
 
-echo "== [2/3] 启动后端 (conda env: $CONDA_ENV, 127.0.0.1:$SERVE_PORT) =="
+echo "== [2/3] 编译并启动 Go 后端 (127.0.0.1:$SERVE_PORT) =="
 if [[ -f .backend.pid ]] && kill -0 "$(cat .backend.pid)" 2>/dev/null; then
   echo "  停止旧后端 PID $(cat .backend.pid)"
   kill "$(cat .backend.pid)" || true
   sleep 1
 fi
 
-# conda 常不在非交互 shell 的 PATH 里(.bashrc 的 conda init 被交互检查挡住),
-# 故显式 source conda.sh。覆盖常见安装位置(含本机的 ~/software/miniconda3)。
-CONDA_SH=""
-if command -v conda >/dev/null 2>&1; then
-  CONDA_SH="$(conda info --base 2>/dev/null)/etc/profile.d/conda.sh"
+# 需要 go ≥ 1.26(go.mod: go 1.26.4)。非交互 shell 可能不在 PATH,
+# 兼容常见安装位置(/usr/local/go、~/go、snap、homebrew)。
+ensure_go() {
+  if command -v go >/dev/null 2>&1; then return 0; fi
+  for cand in /usr/local/go/bin/go /usr/lib/go/bin/go \
+              "$HOME/go/bin/go" /snap/go/current/bin/go \
+              /opt/homebrew/bin/go /usr/local/bin/go; do
+    if [[ -x "$cand" ]]; then export PATH="$(dirname "$cand"):$PATH"; return 0; fi
+  done
+  return 1
+}
+if ! ensure_go; then
+  echo "  找不到 go(需 ≥$GO_VERSION_MIN,见 https://go.dev/dl/)"; exit 1
 fi
-for cand in "$CONDA_SH" \
-            "$HOME/software/miniconda3/etc/profile.d/conda.sh" \
-            "$HOME/miniconda3/etc/profile.d/conda.sh" \
-            "$HOME/anaconda3/etc/profile.d/conda.sh" \
-            "/opt/conda/etc/profile.d/conda.sh"; do
-  if [[ -n "$cand" && -f "$cand" ]]; then CONDA_SH="$cand"; break; fi
-done
-if [[ -z "$CONDA_SH" ]]; then
-  echo "  找不到 conda.sh(确认 conda 已安装)"; exit 1
-fi
-set +u  # conda.sh 同样不耐 set -u
-# shellcheck disable=SC1090
-source "$CONDA_SH"
-set -u
+echo "  go: $(go version 2>&1)"
 
-conda activate "$CONDA_ENV"
-mkdir -p logs
+# 编译后端为静态二进制(modernc.org/sqlite 纯 Go,无需 CGO)
+mkdir -p .bin
+( cd server-go && CGO_ENABLED=0 go build -trimpath -o ../.bin/douyin-server ./cmd/server )
+
 # 仅绑 loopback:edge-nginx(host 网络)可达,公网不可达
-nohup python run.py --serve --serve-host 127.0.0.1 --serve-port "$SERVE_PORT" -c config.yml \
+mkdir -p logs
+nohup ./.bin/douyin-server -config config.yml -host 127.0.0.1 -port "$SERVE_PORT" \
   > logs/backend.log 2>&1 &
 echo $! > .backend.pid
 disown 2>/dev/null || true

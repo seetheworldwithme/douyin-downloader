@@ -1,81 +1,67 @@
-<!-- Generated: 2026-03-27 | Updated: 2026-05-08 -->
-
 # douyin-downloader
 
 ## Purpose
-A Python-based Douyin (TikTok China) batch downloader that fetches videos, galleries, music, and user content without watermarks. Supports multiple download modes (user posts, likes, mixes, music), concurrent downloads with rate limiting, cookie-based authentication, and optional Whisper transcription. CLI-driven with YAML configuration.
+A Douyin (TikTok China) video downloader. Paste a Douyin link in the web UI, get the
+no-watermark video back as a streaming download. Backend is a single Go binary
+(`server-go/`); frontend is a Vue + Vite PWA (`web/`) that builds to `server/static/`.
 
-## Key Files
+## Architecture
 
-| File | Description |
-|------|-------------|
-| `run.py` | Entry point — bootstraps `sys.path` and delegates to `cli.main:main()` |
-| `__init__.py` | Package version (`2.0.0`) |
-| `pyproject.toml` | Build config, dependencies, CLI entry point (`douyin-dl`), tool settings |
-| `config.example.yml` | Example YAML config for users to copy and customize |
-| `requirements.txt` | Pinned dependency list (mirrors pyproject.toml) |
-| `Dockerfile` | Container build for the downloader |
-| `PROJECT_SUMMARY.md` | Architecture overview document |
+| Layer | Location | Notes |
+|-------|----------|-------|
+| Go backend | `server-go/` | module `github.com/xuziyue/douyin-downloader` |
+| Frontend | `web/` | Vue 3 + Vite + vite-plugin-pwa; builds to `../server/static` |
+| Build output | `server/static/` | served by Go SPA fallback + nginx container |
+| Config | `config.yml`, `config.example.yml` | YAML, same schema the Python version used |
+| Cookies | `.cookies.json`, `config/cookies.json` | runtime secrets (gitignored) |
+| Deploy | `docker/` | edge-nginx TLS + nginx static container + host Go process |
 
-## Subdirectories
+### Go package layout (`server-go/internal/`)
 
-| Directory | Purpose |
-|-----------|---------|
-| `auth/` | Cookie and MS token management (see `auth/AGENTS.md`) |
-| `cli/` | CLI argument parsing, main async loop, progress display (see `cli/AGENTS.md`) |
-| `config/` | YAML config loading, env var overrides, defaults (see `config/AGENTS.md`) |
-| `control/` | Concurrency control — rate limiter, retry handler, queue manager (see `control/AGENTS.md`) |
-| `core/` | Business logic — API client, URL parser, downloaders, strategy pattern (see `core/AGENTS.md`) |
-| `storage/` | SQLite database, file management, metadata handling (see `storage/AGENTS.md`) |
-| `tests/` | Pytest test suite with 23 test modules (see `tests/AGENTS.md`) |
-| `tools/` | Standalone utilities like browser-based cookie fetching (see `tools/AGENTS.md`) |
-| `utils/` | Shared helpers — logging, validation, anti-bot signatures (see `utils/AGENTS.md`) |
+| Package | Responsibility |
+|---------|----------------|
+| `cmd/server` | Entry point: parses `-config/-host/-port` flags, wires deps, runs server |
+| `auth` | Cookie + MS-token management |
+| `config` | YAML config load/merge, env overrides (`DOUYIN_*`), cookie resolution |
+| `control` | Rate limiter, retry handler, queue manager |
+| `core` | Douyin API client, URL parser, video resolver |
+| `server` | REST handlers, JWT-like auth, CORS, SPA static serving |
+| `storage` | SQLite (history/aweme/jobs) via `modernc.org/sqlite` (pure Go, no CGO) |
+| `utils` | Anti-bot signatures (a/bogus, xbogus), logging, cookie/filename helpers |
+
+### REST API (`/api/v1/`)
+
+| Endpoint | Method | Auth | Purpose |
+|----------|--------|------|---------|
+| `/health` | GET | — | Liveness |
+| `/login` | POST | — | Username/password → token |
+| `/resolve` | POST | token | Resolve a Douyin URL → title/filename/aweme_id |
+| `/stream` | GET | token | Stream the resolved video (proxied; no on-disk save) |
+
+Non-`/api/` paths fall back to the SPA `index.html`.
 
 ## For AI Agents
 
-### Working In This Directory
-- Python 3.8+ compatibility required — avoid walrus operator, `match` statements, and `type` aliases
-- All I/O is async (`aiohttp`, `aiofiles`, `aiosqlite`) — never use blocking I/O in core paths
-- Entry point is `cli.main:main()` which calls `asyncio.run(main_async(args))`
-- Config is YAML-based with env var overrides (`DOUYIN_*` prefix)
-- The `mix`/`allmix` config alias system requires special handling (see `config/config_loader.py`)
+### Working in this repo
+- Go ≥ 1.26 (`go.mod`: `go 1.26.4`). Pure-Go SQLite — `CGO_ENABLED=0 go build` works.
+- Build & run locally (from repo root):
+  - Backend: `cd server-go && go build -o ../.bin/server ./cmd/server && ../.bin/server -config ../config.yml`
+  - Frontend dev: `cd web && npm install && npm run dev` (Vite proxies `/api` → `127.0.0.1:8000`)
+  - Frontend prod build: `cd web && npm run build` → `server/static/`
+- Config defaults live in `server-go/internal/config/default_config.go`;
+  loader/merge in `loader.go`; cookie resolution in `GetCookies()`.
 
-### Shared Logic With Desktop
-- This project shares Python backend logic with `/Users/crimson/codes/douyin/douyin-downloader-desktop`.
-- When fixing shared logic in `auth/`, `cli/`, `config/`, `control/`, `core/`, `storage/`, `tools/`, `utils/`, or shared tests, apply the equivalent fix in both projects unless the difference is explicitly desktop-only or CLI-only.
-- Before finishing a shared-logic fix, compare the touched shared files against the sibling project and either keep them identical or document the intentional divergence.
-- **Sync script:** `../douyin-downloader-desktop/scripts/sync-to-cli.sh` copies all shared files from the desktop project here. Run `--check` to detect drift.
-- **Intentional divergences** (these files differ by design):
-  - `cli/main.py` — CLI omits desktop-only `_verify_self_checksum()` and `_enforce_license_at_startup()`.
-  - `run.py` — CLI is a simple bootstrap; desktop has sidecar startup + data-dir migration.
-  - `server/app.py`, `server/jobs.py` — CLI server is a simplified subset; desktop adds license, SSE, overrides, cancel.
-  - `control/__init__.py` — CLI doesn't export `ProgressReporter` classes (desktop UI only).
+### Testing
+- `cd server-go && go test ./...` (unit tests per package, `*_test.go`).
+- Lint/build: `cd server-go && go vet ./... && go build ./...`.
 
-### Testing Requirements
-- Run: `python -m pytest tests/`
-- Async tests use `pytest-asyncio` with `asyncio_mode = "auto"`
-- Linting: `ruff check .` (target Python 3.8, line-length 100)
+### Deploy
+- One command from repo root: `bash docker/deploy.sh` (SSH deploys to the server).
+- `docker/start.sh` rebuilds frontend, recompiles the Go binary, restarts it, restarts nginx container.
+- Edge-nginx terminates TLS; `/` → nginx static (8083), `/api/` → Go server (8000).
 
-### Common Patterns
-- Factory pattern for downloaders (`DownloaderFactory.create()`)
-- Strategy pattern for user download modes (`core/user_modes/`)
-- Registry pattern for mode discovery (`UserModeRegistry`)
-- All downloaders inherit from `BaseDownloader` with shared `_download_mode_items()`
-- Logging via `utils.logger.setup_logger(name)` — one logger per module
-
-## Dependencies
-
-### External
-- `aiohttp` — async HTTP client for API calls and downloads
-- `aiofiles` — async file I/O
-- `aiosqlite` — async SQLite for download history
-- `rich` — terminal UI (progress bars, tables, styled output)
-- `pyyaml` — YAML config parsing
-- `python-dateutil` — date/time parsing for time-range filters
-- `gmssl` — Chinese SM3/SM4 crypto for anti-bot signatures
-
-### Optional
-- `playwright` — browser automation for cookie fetching
-- `openai-whisper` — audio transcription
-
-<!-- MANUAL: -->
+### Scope note
+The Go backend implements the **single-video web download** flow only
+(resolve + stream). The old Python CLI batch modes (user posts/likes/mixes/music/live/
+transcription/comments) are not ported. Add new server endpoints under `server-go/internal/server/`
+if batch features are needed again.

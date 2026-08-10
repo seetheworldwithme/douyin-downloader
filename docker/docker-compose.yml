@@ -4,7 +4,7 @@
 # 只绑 127.0.0.1:8083(loopback),不占 80/443,不碰 edge-nginx 现有配置。
 # 由 edge-nginx(独占公网 80/443)做 TLS 终结并反代 douyin.xuziyue.work:
 #     location /      → 本容器 127.0.0.1:8083(SPA)
-#     location /api/  → 后端   127.0.0.1:8000(conda dogs, run.py --serve)
+#     location /api/  → 后端   127.0.0.1:8000(Go server, server-go)
 # (edge-nginx 的 server block 见 docker/edge-proxy/douyin.xuziyue.work.conf)
 services:
   nginx:

@@ -2,7 +2,7 @@
 # 从本地经 SSH 部署到服务器(凭据读自仓库根的 .env):
 #   1) 远端 git pull(有本地改动则 stash 后再拉,保住改动)
 #   2) scp 同步 config.yml / .cookies.json(gitignored,含密钥)
-#   3) 远端执行 docker/start.sh:构建前端 + 起 conda 后端 + 起前端容器
+#   3) 远端执行 docker/start.sh:构建前端 + 编译起 Go 后端 + 起前端容器
 #   4) 把 edge-nginx 的 douyin server block 落到 conf.d,nginx -t 校验后 reload
 #
 # 用法:在仓库根执行 `bash docker/deploy.sh`

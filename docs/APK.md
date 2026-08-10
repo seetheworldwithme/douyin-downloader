@@ -5,7 +5,7 @@
 不经服务器磁盘、不进通用下载夹。
 
 ```
-手机 APP(Capacitor WebView,本地 UI) ──HTTPS──> 远程部署的 Python 服务(--serve)
+手机 APP(Capacitor WebView,本地 UI) ──HTTPS──> 远程部署的 Go 服务(server-go)
    └ 原生插件 OkHttp 拉 /api/v1/stream → MediaStore.Video → 相册可见
 ```
 

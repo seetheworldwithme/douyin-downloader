@@ -9,8 +9,8 @@
             ┌────────────┴────────────┐
    location /                location /api/
       ↓                          ↓
- douyin-web 容器            conda dogs 宿主机进程
- 127.0.0.1:8083 (nginx)     127.0.0.1:8000 (run.py --serve)
+ douyin-web 容器            Go 后端 宿主机进程
+ 127.0.0.1:8083 (nginx)     127.0.0.1:8000 (server-go)
  纯静态托管 SPA              解析 + 流式中转(不落盘)
 ```
 
@@ -20,7 +20,7 @@
 
 | 文件 | 作用 |
 |------|------|
-| `start.sh` | **服务器端**:构建前端 + 起 conda 后端 + 起前端容器 |
+| `start.sh` | **服务器端**:构建前端 + 编译起 Go 后端 + 起前端容器 |
 | `deploy.sh` | **本地端**:SSH 拉代码 + 同步密钥 + 跑 start.sh + 落 edge-nginx 配置并 reload |
 | `docker-compose.yml` | 前端官方 nginx 镜像,`127.0.0.1:8083:80`,挂载 `server/static` + `nginx.conf` |
 | `nginx.conf` | 前端容器纯静态 server block(SPA + 缓存,不处理 /api) |
@@ -31,7 +31,7 @@
 
 1. **Docker**(带 compose 插件)+ `sudo usermod -aG docker ubuntu`(重新登录生效)。
 2. **Node**(前端构建用)。
-3. **conda `dogs`** 装依赖:`conda activate dogs && pip install -r requirements.txt fastapi uvicorn`。
+3. **Go**(≥ 1.26,后端编译用):见 https://go.dev/dl/ 。
 4. **clone 代码**到 `code_dir`;**DNS** `douyin.xuziyue.work` → 服务器 IP;证书已存在
    (`/etc/letsencrypt/live/douyin.xuziyue.work/`)。
 5. **证书续期切 webroot**(一次性,见下「证书续期」)。

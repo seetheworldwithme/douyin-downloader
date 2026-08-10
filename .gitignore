@@ -43,6 +43,9 @@ server/static/
 web/android/
 web/ios/
 
+# Android APK build output (build-android.sh 产物)
+release/
+
 # Android release signing keys (never commit)
 *.keystore
 *.jks

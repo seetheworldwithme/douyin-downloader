@@ -5,7 +5,7 @@
 #   bash build-android.sh                          # debug 包(可直接安装)
 #   BUILD_VARIANT=release bash build-android.sh    # release(需自配签名)
 #
-# 产出:.bin/douyin-downloader.apk
+# 产出:release/apk/douyin-downloader.apk
 # 安装:~/Library/Android/sdk/platform-tools/adb install -r .bin/douyin-downloader.apk
 #
 # 幂等:可重复执行;首次会 cap add android + 下载 Gradle/AGP 依赖(较慢)。
@@ -20,7 +20,7 @@ ANDROID_DIR="$WEB/android"
 PKG_DOT="io.github.nick.dydl"            # capacitor.config.json 的 appId
 JAVA_DIR_REL="io/github/nick/dydl"
 PLUGIN_JAVA="$ROOT/mobile/native/SaveToGalleryPlugin.java"
-APK_OUT="$ROOT/.bin/douyin-downloader.apk"
+APK_OUT="$ROOT/release/apk/douyin-downloader.apk"
 DEFAULT_SDK="$HOME/Library/Android/sdk"
 AS_JBR="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 MIRROR_INIT="$ANDROID_DIR/mirror.init.gradle"

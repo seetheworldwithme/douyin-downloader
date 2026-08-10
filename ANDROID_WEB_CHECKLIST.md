@@ -16,10 +16,12 @@
 | **P2-9 过时文案** | `web/src/components/SettingsCard.vue` | "Python --serve" → "Go server",并提示 APP 必须 HTTPS |
 | **默认服务器地址** | `web/src/api.js` | 原生 APK 首启默认 `https://douyin.xuziyue.work`,**无需配置**(已 curl 验证线上 HTTPS 可达);网页同源仍留空 |
 | **P1-4 安卓图标** | `web/public/icon*.svg` + `web/assets/*.png` | 重绘下载图标(渐变+白箭头),生成 1024 源图 + 自适应前景/背景层;`npm run assets:android` 一键生成 mipmap |
+| **一键打包脚本** | `build-android.sh` + `mobile/native/SaveToGalleryPlugin.java` + `web/capacitor.config.json` | `bash build-android.sh` 全自动:cap add、minSdk29、OkHttp、注册插件(改 Java——模板无 Kotlin)、装 android-35、阿里云镜像、图标、assembleDebug → `.bin/douyin-downloader.apk`。已本机验证产出 11M debug APK |
 
-验证:`go vet`/`go build`/`TestCORS` 通过;`npm run build:native`(无 SW)与 `npm run build`(含 PWA)均构建成功;线上 `https://douyin.xuziyue.work/api/v1/health` 返回 `{"status":"ok"}`。
+验证:`go vet`/`go build`/`TestCORS` 通过;`npm run build:native`(无 SW)与 `npm run build`(含 PWA)均构建成功;线上 `https://douyin.xuziyue.work/api/v1/health` 返回 `{"status":"ok"}`;`rm -rf web/android && bash build-android.sh` 从零产出 APK。
 
-> 仍未做(需手动/环境相关,非纯代码):P0-3 部署侧(线上 `config.yml` 的 `cors_origins` 留空即可——服务端已自动兜底 localhost)、P1-5 gradle(`cap add android` 后把 minSdk 设 29、加 OkHttp 依赖)、P1-6 证书(线上已 HTTPS ✓)、P3 打磨项(状态栏/闪屏/返回键)。
+> 仍未做(需手动/环境相关):P0-3 部署侧(线上 `config.yml` 的 `cors_origins` 留空即可——服务端已自动兜底 localhost)、P1-5 gradle(**已由 `build-android.sh` 自动处理**)、P1-6 证书(线上已 HTTPS ✓)、P3 打磨项(状态栏/闪屏/返回键)。
+> 打包:直接 `bash build-android.sh`,产物 `.bin/douyin-downloader.apk`。
 
 ---
 
@@ -135,35 +137,40 @@
 
 ---
 
-## 🛠️ 打包步骤(确认上面的 P0/P1 后执行)
+## 🛠️ 打包步骤
+
+**推荐:一键脚本**(已把下面的手动步骤 + 国内镜像/JDK/平台全部自动化)
 
 ```bash
-cd web
-npm install
-npm run build                 # 产物到 ../server/static(= webDir)
-
-# 1) 生成安卓工程
-npx cap add android
-
-# 2) 接入原生插件
-cp ../mobile/native/SaveToGalleryPlugin.kt \
-   android/app/src/main/java/io/github/nick/dydl/SaveToGalleryPlugin.kt
-
-# 3) 改 android/variables.gradle: minSdkVersion = 29
-# 4) 改 android/app/build.gradle: dependencies 里加 okhttp:4.12.0(见 app.build.gradle.snippet)
-
-npx cap sync android          # 同步 web 产物 + 插件
-npx cap open android          # 用 Android Studio 打开,Run / Build APK
+bash build-android.sh
+#   产出:.bin/douyin-downloader.apk(debug,可直接安装)
+#   安装到手机(开 USB 调试,连电脑):
+~/Library/Android/sdk/platform-tools/adb install -r .bin/douyin-downloader.apk
+#   release 包:BUILD_VARIANT=release bash build-android.sh(需自配签名)
 ```
 
-> 顺序注意:`cap add android` 只执行一次;之后每次 `npm run build && npx cap sync android` 即可更新。
+脚本内部:构建前端 → `cap add android`(仅首次)→ 补丁(minSdk29 / OkHttp / 注册 Java 插件)→ 缺则装 android-35 平台(腾讯云镜像)→ 写阿里云 Maven 镜像 → 生成图标 → `cap sync` → `gradlew assembleDebug`。**幂等,可反复跑**;本机已验证 `rm -rf web/android && bash build-android.sh` 从零产出 11M APK。
+
+<details><summary>手动等价步骤(仅供排查脚本时参考)</summary>
+
+```bash
+cd web && npm install && npm run build:native
+npx cap add android
+# android/variables.gradle:        minSdkVersion = 29
+# android/app/build.gradle deps:   implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+# 复制 mobile/native/SaveToGalleryPlugin.java → android/app/src/main/java/io/github/nick/dydl/
+# MainActivity.onCreate 里:        registerPlugin(SaveToGalleryPlugin.class);  // 在 super.onCreate 前
+npx cap sync android
+cd android && ./gradlew assembleDebug
+```
+</details>
 
 ---
 
 ## 📋 上架前自检
 
-- [ ] APK 首启:无服务器地址 → 强制进设置页(✅ 已有逻辑)
-- [ ] 填 `https://你的域名` → 健康检查亮"在线"
+- [ ] APK 首启:默认即用线上服务器,直接进登录页(无需配地址;`api.js` 默认 `https://douyin.xuziyue.work`)
+- [ ] 健康检查亮"在线"
 - [ ] 登录成功 → 解析链接 → 确认下载 → 相册 `Movies/抖音下载器` 出现 mp4
 - [ ] 状态栏不遮挡头部、底部按钮不被手势条遮挡(验证 P0-1)
 - [ ] 桌面图标 / 名称正确(验证 P1-4)

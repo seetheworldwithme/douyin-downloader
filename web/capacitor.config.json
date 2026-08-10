@@ -1,0 +1,7 @@
+{
+  "appId": "io.github.nick.dydl",
+  "appName": "抖音下载器",
+  "webDir": "../server/static",
+  "server": { "androidScheme": "https" },
+  "android": { "allowMixedContent": false }
+}

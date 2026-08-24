@@ -1,0 +1,2 @@
+# shell 脚本必须保持 LF,否则 Windows 检出为 CRLF 后 bash 报 "set: pipefail: invalid option name"
+*.sh text eol=lf

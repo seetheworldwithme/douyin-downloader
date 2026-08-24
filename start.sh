@@ -67,6 +67,11 @@ echo "  go: $(go version 2>&1)"
 mkdir -p .bin
 ( cd server-go && CGO_ENABLED=0 go build -trimpath -o ../.bin/douyin-server ./cmd/server )
 
+# 图集「合成视频」功能依赖宿主机 ffmpeg;缺失只告警不阻断启动(下载图片不受影响)
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "  ⚠ 未找到 ffmpeg:图集「合成视频下载」将不可用。安装:apt install ffmpeg"
+fi
+
 # 仅绑 loopback:edge-nginx(host 网络)可达,公网不可达
 mkdir -p logs
 nohup ./.bin/douyin-server -config config.yml -host 127.0.0.1 -port "$SERVE_PORT" \

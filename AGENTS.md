@@ -35,8 +35,8 @@ no-watermark video back as a streaming download. Backend is a single Go binary
 |----------|--------|------|---------|
 | `/health` | GET | — | Liveness |
 | `/login` | POST | — | Username/password → token |
-| `/resolve` | POST | token | Resolve a Douyin URL → title/filename/aweme_id |
-| `/stream` | GET | token | Stream the resolved video (proxied; no on-disk save) |
+| `/resolve` | POST | token | Resolve a Douyin URL → title/filename/aweme_id/type (`video`\|`images`)/image_count/has_music |
+| `/stream` | GET | token | Stream the resolved media. Videos are proxied (no on-disk save). Gallery posts take `mode=images` (single image raw / multi-image ZIP, streamed) or `mode=video` (ffmpeg slideshow with the post's music; requires ffmpeg on the server — `ffmpeg_path` config or PATH, concurrent encodes capped at 2) |
 
 Non-`/api/` paths fall back to the SPA `index.html`.
 
@@ -61,7 +61,8 @@ Non-`/api/` paths fall back to the SPA `index.html`.
 - Edge-nginx terminates TLS; `/` → nginx static (8083), `/api/` → Go server (8000).
 
 ### Scope note
-The Go backend implements the **single-video web download** flow only
-(resolve + stream). The old Python CLI batch modes (user posts/likes/mixes/music/live/
-transcription/comments) are not ported. Add new server endpoints under `server-go/internal/server/`
+The Go backend implements the **single-post web download** flow only
+(resolve + stream, for both videos and gallery/image posts). The old Python CLI
+batch modes (user posts/likes/mixes/music/live/transcription/comments) are not
+ported. Add new server endpoints under `server-go/internal/server/`
 if batch features are needed again.

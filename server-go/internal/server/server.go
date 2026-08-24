@@ -1,6 +1,7 @@
 package server
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -12,7 +13,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -276,18 +279,26 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info, err := s.resolveVideo(r.Context(), req.URL)
+	info, err := s.resolveMedia(r.Context(), req.URL)
 	if err != nil {
 		s.handleResolveError(w, err)
 		return
 	}
 	defer info.APIClient.Close()
 
-	writeJSON(w, 200, map[string]string{
-		"title":    info.Title,
-		"filename": info.Filename,
-		"aweme_id": info.AwemeID,
-	})
+	resp := map[string]any{
+		"title":       info.Title,
+		"aweme_id":    info.AwemeID,
+		"type":        info.Type,
+		"image_count": len(info.Images),
+	}
+	if info.Type == "images" {
+		resp["filename"] = info.BaseName
+		resp["has_music"] = len(info.MusicURLs) > 0
+	} else {
+		resp["filename"] = info.Video.Filename
+	}
+	writeJSON(w, 200, resp)
 }
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
@@ -297,16 +308,31 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info, err := s.resolveVideo(r.Context(), videoURL)
+	info, err := s.resolveMedia(r.Context(), videoURL)
 	if err != nil {
 		s.handleResolveError(w, err)
 		return
 	}
 
+	mode := r.URL.Query().Get("mode")
+	switch {
+	case info.Type == "images" && mode == "video":
+		s.streamImageVideo(w, r, info)
+	case info.Type == "images":
+		s.streamImages(w, r, info)
+	default:
+		s.streamVideo(w, r, info)
+	}
+}
+
+// streamVideo proxies the upstream no-watermark video without saving to disk.
+func (s *Server) streamVideo(w http.ResponseWriter, r *http.Request, res *resolveResult) {
+	defer res.APIClient.Close()
+	info := res.Video
+
 	// Make upstream request
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), "GET", info.VideoURL, nil)
 	if err != nil {
-		info.APIClient.Close()
 		writeError(w, 500, fmt.Sprintf("internal error: %v", err))
 		return
 	}
@@ -314,9 +340,8 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		upstreamReq.Header.Set(k, v)
 	}
 
-	resp, err := info.APIClient.Client().Do(upstreamReq)
+	resp, err := res.APIClient.Client().Do(upstreamReq)
 	if err != nil {
-		info.APIClient.Close()
 		writeError(w, 502, fmt.Sprintf("upstream error: %v", err))
 		return
 	}
@@ -324,7 +349,6 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
 		resp.Body.Close()
-		info.APIClient.Close()
 		writeError(w, 502, fmt.Sprintf("上游返回 %d: %s", resp.StatusCode, string(body)))
 		return
 	}
@@ -335,23 +359,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		contentType = "video/mp4"
 	}
 
-	// Content-Disposition with RFC 5987 encoding
-	encodedFilename := url.QueryEscape(info.Filename)
-	asciiFallback := strings.Map(func(r rune) rune {
-		if r > 127 {
-			return -1
-		}
-		if r == '"' {
-			return -1
-		}
-		return r
-	}, info.Filename)
-	if strings.TrimSpace(asciiFallback) == "" {
-		asciiFallback = "video.mp4"
-	}
-
-	w.Header().Set("Content-Disposition",
-		fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, asciiFallback, encodedFilename))
+	setContentDisposition(w, info.Filename, "video.mp4")
 	w.Header().Set("Content-Type", contentType)
 	if cl := resp.Header.Get("Content-Length"); cl != "" {
 		w.Header().Set("Content-Length", cl)
@@ -360,16 +368,165 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	// Stream and cleanup
 	defer resp.Body.Close()
-	defer info.APIClient.Close()
 	io.Copy(w, resp.Body)
+}
+
+// streamImages serves a gallery post as raw images: a single image is streamed
+// directly, multiple images are packaged into a ZIP on the fly.
+func (s *Server) streamImages(w http.ResponseWriter, r *http.Request, res *resolveResult) {
+	defer res.APIClient.Close()
+	ctx := r.Context()
+
+	if len(res.Images) == 0 {
+		writeError(w, 400, "该链接没有可下载的图片")
+		return
+	}
+
+	// Fetch the first image up front so failures still get a proper status code.
+	firstData, firstType, err := core.DownloadImage(ctx, res.APIClient, res.Images[0])
+	if err != nil {
+		writeError(w, 502, fmt.Sprintf("图片下载失败: %v", err))
+		return
+	}
+
+	if len(res.Images) == 1 {
+		ext := core.ImageExt(firstData, firstType)
+		setContentDisposition(w, res.BaseName+ext, "image"+ext)
+		w.Header().Set("Content-Type", core.ImageContentType(ext))
+		w.Header().Set("Content-Length", strconv.Itoa(len(firstData)))
+		w.WriteHeader(200)
+		w.Write(firstData)
+		return
+	}
+
+	width := len(strconv.Itoa(len(res.Images)))
+	if width < 2 {
+		width = 2
+	}
+	entryName := func(i int, ext string) string {
+		return fmt.Sprintf("%s_%0*d%s", res.BaseName, width, i+1, ext)
+	}
+
+	setContentDisposition(w, res.BaseName+".zip", "images.zip")
+	w.Header().Set("Content-Type", "application/zip")
+	w.WriteHeader(200)
+
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+	writeEntry := func(name string, data []byte) error {
+		hdr := &zip.FileHeader{Name: name, Method: zip.Store, Modified: time.Now()}
+		hdr.SetMode(0o644)
+		fw, err := zw.CreateHeader(hdr)
+		if err != nil {
+			return err
+		}
+		_, err = fw.Write(data)
+		return err
+	}
+
+	if err := writeEntry(entryName(0, core.ImageExt(firstData, firstType)), firstData); err != nil {
+		slog.Error("zip write failed", "error", err)
+		return
+	}
+	for i := 1; i < len(res.Images); i++ {
+		data, ctype, err := core.DownloadImage(ctx, res.APIClient, res.Images[i])
+		if err != nil {
+			// Headers are already sent; leave a note in the archive and stop.
+			slog.Error("gallery image download failed", "index", i, "error", err)
+			writeEntry("下载失败说明.txt", []byte(fmt.Sprintf("第 %d 张图片下载失败: %v\n", i+1, err)))
+			return
+		}
+		if err := writeEntry(entryName(i, core.ImageExt(data, ctype)), data); err != nil {
+			slog.Error("zip write failed", "index", i, "error", err)
+			return
+		}
+	}
+}
+
+// composeSlots caps concurrent ffmpeg encodes — composition is CPU intensive
+// and a small VPS cannot run several at once.
+var composeSlots = make(chan struct{}, 2)
+
+// streamImageVideo composes the gallery into an MP4 slideshow (with the post's
+// background music when available) and serves the resulting file.
+func (s *Server) streamImageVideo(w http.ResponseWriter, r *http.Request, res *resolveResult) {
+	defer res.APIClient.Close()
+	ctx := r.Context()
+
+	ffmpegPath, err := core.FindFFmpeg(s.deps.Config.Config.FFmpegPath)
+	if err != nil {
+		writeError(w, 500, `服务器未安装 ffmpeg,无法把图集合成为视频;请选择"下载图片",或在服务器安装 ffmpeg(如 apt install ffmpeg)后重试`)
+		return
+	}
+
+	select {
+	case composeSlots <- struct{}{}:
+		defer func() { <-composeSlots }()
+	case <-ctx.Done():
+		return
+	}
+
+	workDir, err := os.MkdirTemp("", "dydl-compose-*")
+	if err != nil {
+		writeError(w, 500, fmt.Sprintf("创建临时目录失败: %v", err))
+		return
+	}
+	defer os.RemoveAll(workDir)
+
+	var images []core.SlideshowImage
+	for i, item := range res.Images {
+		data, ctype, err := core.DownloadImage(ctx, res.APIClient, item)
+		if err != nil {
+			writeError(w, 502, fmt.Sprintf("第 %d 张图片下载失败: %v", i+1, err))
+			return
+		}
+		path := filepath.Join(workDir, fmt.Sprintf("img_%03d%s", i, core.ImageExt(data, ctype)))
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			writeError(w, 500, fmt.Sprintf("写入临时文件失败: %v", err))
+			return
+		}
+		images = append(images, core.SlideshowImage{Path: path, Width: item.Width, Height: item.Height})
+	}
+
+	audioPath := ""
+	if len(res.MusicURLs) > 0 {
+		data, _, err := core.DownloadMusic(ctx, res.APIClient, res.MusicURLs)
+		if err != nil {
+			slog.Warn("背景音乐下载失败, 改为无声合成", "error", err)
+		} else {
+			audioPath = filepath.Join(workDir, "music"+core.AudioExt(data))
+			if err := os.WriteFile(audioPath, data, 0o644); err != nil {
+				slog.Warn("写入音乐临时文件失败, 改为无声合成", "error", err)
+				audioPath = ""
+			}
+		}
+	}
+
+	perImage := core.SlideshowPerImageDuration(len(res.Images), res.MusicDurationMS)
+	outPath, err := core.ComposeSlideshow(ctx, ffmpegPath, workDir, images, audioPath, perImage)
+	if err != nil {
+		slog.Error("slideshow compose failed", "aweme_id", res.AwemeID, "error", err)
+		writeError(w, 500, fmt.Sprintf("视频合成失败: %v", err))
+		return
+	}
+
+	f, err := os.Open(outPath)
+	if err != nil {
+		writeError(w, 500, fmt.Sprintf("打开合成结果失败: %v", err))
+		return
+	}
+	defer f.Close()
+
+	setContentDisposition(w, res.BaseName+".mp4", "video.mp4")
+	http.ServeContent(w, r, "", time.Time{}, f)
 }
 
 type resolveResult struct {
 	APIClient *core.DouyinAPIClient
-	*core.VideoInfo
+	*core.MediaInfo
 }
 
-func (s *Server) resolveVideo(ctx context.Context, rawURL string) (*resolveResult, error) {
+func (s *Server) resolveMedia(ctx context.Context, rawURL string) (*resolveResult, error) {
 	quality := s.deps.Config.Config.VideoQuality
 
 	apiClient := core.NewDouyinAPIClient(
@@ -377,7 +534,7 @@ func (s *Server) resolveVideo(ctx context.Context, rawURL string) (*resolveResul
 		s.deps.Config.Config.Proxy,
 	)
 
-	info, err := core.ResolveVideo(ctx, rawURL, apiClient, quality)
+	info, err := core.ResolveMedia(ctx, rawURL, apiClient, quality)
 	if err != nil {
 		apiClient.Close()
 		return nil, err
@@ -385,8 +542,27 @@ func (s *Server) resolveVideo(ctx context.Context, rawURL string) (*resolveResul
 
 	return &resolveResult{
 		APIClient:  apiClient,
-		VideoInfo:  info,
+		MediaInfo:  info,
 	}, nil
+}
+
+// setContentDisposition sets an RFC 5987 encoded attachment filename.
+func setContentDisposition(w http.ResponseWriter, filename, asciiFallback string) {
+	encodedFilename := url.QueryEscape(filename)
+	ascii := strings.Map(func(r rune) rune {
+		if r > 127 {
+			return -1
+		}
+		if r == '"' {
+			return -1
+		}
+		return r
+	}, filename)
+	if strings.TrimSpace(ascii) == "" {
+		ascii = asciiFallback
+	}
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, ascii, encodedFilename))
 }
 
 func (s *Server) handleResolveError(w http.ResponseWriter, err error) {

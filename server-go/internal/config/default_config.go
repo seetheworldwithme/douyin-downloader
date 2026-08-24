@@ -26,6 +26,7 @@ type Config struct {
 	RateLimit        float64            `yaml:"rate_limit"`
 	Proxy            string             `yaml:"proxy"`
 	VideoQuality     string             `yaml:"video_quality"`
+	FFmpegPath       string             `yaml:"ffmpeg_path"`
 	Database         bool               `yaml:"database"`
 	DatabasePath     string             `yaml:"database_path"`
 	Progress         map[string]any     `yaml:"progress"`

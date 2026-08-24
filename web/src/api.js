@@ -74,7 +74,7 @@ export function getHealth() {
   return request('/health')
 }
 
-// 解析视频链接(预览) -> { title, filename, aweme_id }
+// 解析视频/图集链接(预览) -> { title, filename, aweme_id, type, image_count, has_music }
 export function resolveVideo(url) {
   return request('/resolve', {
     method: 'POST',
@@ -84,8 +84,10 @@ export function resolveVideo(url) {
 
 // 构造流式下载 URL,供浏览器原生导航下载(<a> 点击触发另存为)或 APK 原生 OkHttp 拉取。
 // 导航 GET / 原生请求无法携带 Authorization header,所以 token 走 query 参数。
+// mode:图集链接专用 —— 'images' 下载图片(多图 ZIP)/ 'video' 合成为 MP4;视频链接无需传。
 // 返回绝对地址(getServerBase 为空时退化为同源相对路径)。
-export function streamUrl(url) {
-  const params = new URLSearchParams({ url, token: getToken() })
-  return `${getServerBase()}/api/v1/stream?${params.toString()}`
+export function streamUrl(url, mode) {
+  const params = { url, token: getToken() }
+  if (mode) params.mode = mode
+  return `${getServerBase()}/api/v1/stream?${new URLSearchParams(params).toString()}`
 }

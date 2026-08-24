@@ -192,8 +192,10 @@ func getString(m map[string]any, key string) string {
 	return ""
 }
 
-// ResolveVideo takes a URL, resolves it to a video stream info.
-func ResolveVideo(ctx context.Context, rawURL string, apiClient *DouyinAPIClient, quality string) (*VideoInfo, error) {
+// ResolveMedia takes a URL and resolves it to either a video stream info or
+// a gallery (图集) image list. Gallery posts are detected from the aweme detail
+// payload (non-empty "images"), so both /video/ and /note/ links work.
+func ResolveMedia(ctx context.Context, rawURL string, apiClient *DouyinAPIClient, quality string) (*MediaInfo, error) {
 	// Handle short URL
 	if utils.IsShortURL(rawURL) {
 		resolved, err := apiClient.ResolveShortURL(ctx, utils.NormalizeShortURL(rawURL))
@@ -210,8 +212,8 @@ func ResolveVideo(ctx context.Context, rawURL string, apiClient *DouyinAPIClient
 	if parsed == nil {
 		return nil, fmt.Errorf("无法识别的抖音链接")
 	}
-	if parsed.Type != "video" {
-		return nil, fmt.Errorf("仅支持视频链接, 当前类型: %s", parsed.Type)
+	if parsed.Type != "video" && parsed.Type != "gallery" {
+		return nil, fmt.Errorf("仅支持视频/图集链接, 当前类型: %s", parsed.Type)
 	}
 	if parsed.AwemeID == "" {
 		return nil, fmt.Errorf("未能从链接提取视频 ID")
@@ -228,18 +230,36 @@ func ResolveVideo(ctx context.Context, rawURL string, apiClient *DouyinAPIClient
 		return nil, fmt.Errorf("获取视频详情失败 (Cookie 可能过期或被风控)")
 	}
 
-	info, err := BuildNoWatermarkURL(ctx, awemeData, quality, apiClient)
-	if err != nil {
-		return nil, err
-	}
-
 	title := strings.TrimSpace(getString(awemeData, "desc"))
 	if title == "" {
 		title = parsed.AwemeID
 	}
-	info.Filename = utils.SanitizeFilename(title, 80) + ".mp4"
-	info.AwemeID = parsed.AwemeID
-	info.Title = title
+	info := &MediaInfo{
+		Type:     "video",
+		AwemeID:  parsed.AwemeID,
+		Title:    title,
+		BaseName: utils.SanitizeFilename(title, 80),
+	}
+
+	// Gallery posts carry a non-empty "images" array (even when shared via
+	// /video/ links), so check it before falling back to the video stream.
+	if images := extractImages(awemeData); len(images) > 0 {
+		info.Type = "images"
+		info.Images = images
+		info.MusicURLs, info.MusicDurationMS = extractMusic(awemeData)
+		slog.Debug("Resolved gallery", "aweme_id", parsed.AwemeID,
+			"images", len(images), "music_ms", info.MusicDurationMS)
+		return info, nil
+	}
+
+	video, err := BuildNoWatermarkURL(ctx, awemeData, quality, apiClient)
+	if err != nil {
+		return nil, err
+	}
+	video.Filename = info.BaseName + ".mp4"
+	video.AwemeID = parsed.AwemeID
+	video.Title = title
+	info.Video = video
 
 	slog.Debug("Resolved video", "aweme_id", parsed.AwemeID, "title", title)
 	return info, nil

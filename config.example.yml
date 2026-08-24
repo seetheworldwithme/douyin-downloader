@@ -63,6 +63,12 @@ database_path: dy_downloader.db
 # 实际可用档位取决于原视频上传质量。
 video_quality: highest
 
+# 图集（/note/ 链接）「合成视频下载」用的 ffmpeg 路径。
+# 留空时自动在 PATH 里找 ffmpeg；找不到则该功能返回错误提示（「下载图片」不受影响）。
+# 服务器上安装：apt install ffmpeg（或对应平台的包管理器）。
+# 也可用环境变量 DOUYIN_FFMPEG_PATH 覆盖。
+ffmpeg_path: ""
+
 progress:
   quiet_logs: true
 

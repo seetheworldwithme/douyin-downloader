@@ -103,6 +103,9 @@ func (cl *ConfigLoader) mergeConfig(fileConfig *Config) {
 	if fileConfig.VideoQuality != "" {
 		cfg.VideoQuality = fileConfig.VideoQuality
 	}
+	if fileConfig.FFmpegPath != "" {
+		cfg.FFmpegPath = fileConfig.FFmpegPath
+	}
 	cfg.Database = fileConfig.Database
 	if fileConfig.DatabasePath != "" {
 		cfg.DatabasePath = fileConfig.DatabasePath
@@ -145,6 +148,9 @@ func (cl *ConfigLoader) applyEnvOverrides() {
 	}
 	if v := os.Getenv("DOUYIN_PROXY"); v != "" {
 		cl.Config.Proxy = v
+	}
+	if v := os.Getenv("DOUYIN_FFMPEG_PATH"); v != "" {
+		cl.Config.FFmpegPath = v
 	}
 }
 

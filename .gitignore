@@ -39,11 +39,7 @@ web/node_modules/
 web/dist/
 server/static/
 
-# Capacitor generated native project (run `npx cap add android` to recreate)
-web/android/
-web/ios/
-
-# Android APK build output (build-android.sh 产物)
+# Android APK build output (build-android-app.sh 产物)
 release/
 
 # Android release signing keys (never commit)

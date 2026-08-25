@@ -11,6 +11,7 @@ no-watermark video back as a streaming download. Backend is a single Go binary
 |-------|----------|-------|
 | Go backend | `server-go/` | module `github.com/xuziyue/douyin-downloader` |
 | Frontend | `web/` | Vue 3 + Vite + vite-plugin-pwa; builds to `../server/static` |
+| Android app | `android-app/` | Kotlin + Jetpack Compose 原生应用(独立于 web),talks to the same REST API |
 | Build output | `server/static/` | served by Go SPA fallback + nginx container |
 | Config | `config.yml`, `config.example.yml` | YAML, same schema the Python version used |
 | Cookies | `.cookies.json`, `config/cookies.json` | runtime secrets (gitignored) |
@@ -48,6 +49,7 @@ Non-`/api/` paths fall back to the SPA `index.html`.
   - Backend: `cd server-go && go build -o ../.bin/server ./cmd/server && ../.bin/server -config ../config.yml`
   - Frontend dev: `cd web && npm install && npm run dev` (Vite proxies `/api` → `127.0.0.1:8000`)
   - Frontend prod build: `cd web && npm run build` → `server/static/`
+  - Android app: `bash build-android-app.sh` (Git Bash on Windows) → `release/apk/douyin-downloader.apk`; or open `android-app/` in Android Studio
 - Config defaults live in `server-go/internal/config/default_config.go`;
   loader/merge in `loader.go`; cookie resolution in `GetCookies()`.
 

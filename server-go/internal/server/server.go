@@ -92,9 +92,10 @@ func NewServerDeps(cfg *config.ConfigLoader) *ServerDeps {
 		}
 	}
 
-	// 始终放行 Capacitor WebView 的 origin(https://localhost 安卓、
-	// capacitor://localhost iOS):即便 config.yml 自定义了 cors_origins 也
-	// 合并而非覆盖,避免 APK 跨域请求被全量拦截("一直离线 / 登录失败")。
+	// 始终放行 WebView 壳的 origin(https://localhost 安卓、capacitor://localhost
+	// iOS,兼容旧版 Capacitor APK;原生 android-app/ 走 OkHttp 不受 CORS 限制):
+	// 即便 config.yml 自定义了 cors_origins 也合并而非覆盖,
+	// 避免 APK 跨域请求被全量拦截("一直离线 / 登录失败")。
 	corsOrigins := append([]string{}, defaultCORS...)
 	seen := make(map[string]bool, len(defaultCORS))
 	for _, o := range defaultCORS {

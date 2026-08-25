@@ -3,13 +3,8 @@ import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // 开发时:Vite dev server(默认 5173)把 /api 请求代理到后端 :8000
-// 生产时:构建产物输出到 ../server/static,由 Go server 一并托管(同源),
-//         同时被 Capacitor 当作 APK 的 webDir 打包。
-// 原生 APK 构建(Capacitor)不需要 PWA Service Worker:WebView 里资源本就
-// 是本地文件,SW 预缓存无意义、还可能拦截请求。打 APK 前:
-//   BUILD_TARGET=capacitor npm run build  (见 package.json 的 build:native)
-// 普通网页构建(同源托管)保留 PWA。
-const enablePWA = process.env.BUILD_TARGET !== 'capacitor'
+// 生产时:构建产物输出到 ../server/static,由 Go server 一并托管(同源)。
+// (安卓端已拆分为原生工程 android-app/,不再打包网页)
 
 const pwaPlugin = VitePWA({
   registerType: 'autoUpdate',
@@ -43,8 +38,7 @@ const pwaPlugin = VitePWA({
 })
 
 export default defineConfig({
-  // 原生构建关闭 PWA(enablePWA=false);网页构建才注入 pwaPlugin
-  plugins: [vue(), ...(enablePWA ? [pwaPlugin] : [])],
+  plugins: [vue(), pwaPlugin],
   base: '/',
   build: {
     outDir: '../server/static',

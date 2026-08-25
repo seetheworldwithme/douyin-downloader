@@ -2,7 +2,7 @@
 
 A no-watermark Douyin (TikTok China) video downloader built on a **Go backend + Vue frontend**: paste a Douyin link, resolve it server-side, and stream the video back as a download — nothing is saved on the server.
 
-The frontend is an installable PWA and can be packaged into an Android APK via Capacitor.
+The frontend is an installable PWA; a native Android app (Kotlin + Jetpack Compose) lives in `android-app/`.
 
 ## Features
 
@@ -10,7 +10,8 @@ The frontend is an installable PWA and can be packaged into an Android APK via C
 - Streaming download: the backend proxies the video stream; the browser saves it directly; the server stores nothing
 - Auth: username/password → token; API endpoints require a token
 - Configurable proxy, video quality, and cookies
-- PWA: add to home screen, offline shell with live data; APK packaging supported
+- PWA: add to home screen, offline shell with live data
+- Native Android app (Kotlin + Compose): saves videos/images straight to the system gallery — `bash build-android-app.sh` → APK
 
 ## Stack
 
@@ -18,6 +19,7 @@ The frontend is an installable PWA and can be packaged into an Android APK via C
 |-------|------|----------|
 | Backend | Go (`net/http`, pure-Go SQLite `modernc.org/sqlite`, no CGO) | `server-go/` |
 | Frontend | Vue 3 + Vite + vite-plugin-pwa | `web/` |
+| Android | Kotlin + Jetpack Compose (native) | `android-app/` |
 | Build output | static files, served by the Go SPA fallback and the nginx container | `server/static/` |
 | Config | YAML (`config.yml`) | repo root |
 | Deploy | edge-nginx (TLS) + nginx static container + host Go process | `docker/` |

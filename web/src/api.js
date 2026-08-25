@@ -1,15 +1,11 @@
-// 服务器基址:网页同源时留空(相对 /api/v1);原生 APK 默认直接用线上地址。
-// 已内置默认值,无需用户配置。
-import { Capacitor } from '@capacitor/core'
-
-const DEFAULT_SERVER = 'https://douyin.xuziyue.work'
+// 服务器基址:网页与后端同源部署,留空走相对 /api/v1。
+// (安卓端已拆分为原生工程 android-app/,服务器地址内置在那边)
 const SERVER_KEY = 'dd_server'
 
 export function getServerBase() {
   const saved = (localStorage.getItem(SERVER_KEY) || '').trim().replace(/\/+$/, '')
   if (saved) return saved
-  // APK 未配置时回退到线上默认;网页同源时留空
-  return Capacitor.isNativePlatform() ? DEFAULT_SERVER : ''
+  return ''
 }
 
 // 统一走 apiBase:开发时由 Vite 代理 /api -> :8000,生产时与 FastAPI 同源,

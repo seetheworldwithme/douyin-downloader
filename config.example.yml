@@ -126,8 +126,9 @@ notifications:
 server:
   max_jobs: 500
   job_ttl_seconds: 86400   # 完成态 job 保留 24 小时
-  # 跨域允许的来源。Capacitor APK / 自托管前端时需要。
-  # 留空用默认（含 Vite 开发与 Capacitor WebView 来源）；填 ["*"] 全放开。
+  # 跨域允许的来源。自托管前端 / 旧版 WebView APK 时需要。
+  # 留空用默认（含 Vite 开发与常见 WebView 来源）；填 ["*"] 全放开。
+  # 原生安卓 App(android-app/)走 OkHttp,不受浏览器 CORS 限制。
   cors_origins: []
 
 # Web 控制台登录凭据（仅 web / sidecar 的 serve 模式生效）

@@ -1,24 +1,16 @@
 <script setup>
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { ref, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { resolveVideo, streamUrl } from '../api'
-import { Capacitor } from '@capacitor/core'
-import { SaveToGallery } from '../plugins/saveToGallery'
 
 const raw = ref('')
 const busy = ref(false)
-// 原生下载进度(0-100),-1 表示当前不在原生下载中
-const progress = ref(-1)
 
 // 图集解析结果 + 下载方式选择弹窗
 const imageChoice = ref(null)
 const showImageDialog = ref(false)
 // busy 时标记当前正在下载哪种(mode),用于按钮 loading 态
 const busyMode = ref('')
-
-// 是否运行在 Capacitor 安卓壳里(决定下载路径)
-const isNative = Capacitor.isNativePlatform()
-let progressListener = null
 
 // 粘贴的可能是整段分享文案(含文案 + 短链 + 尾部乱码),从中提取第一个抖音链接
 function normalizeUrl(u) {
@@ -39,6 +31,7 @@ const url = computed(() => extractUrl(raw.value.trim()))
 const isValid = computed(() => !!url.value)
 
 // 浏览器(PWA / PC / 安卓 Chrome):<a download> 触发原生另存为,落下载夹。
+// (安卓 App 用户请使用原生版 android-app/,直接存系统相册)
 function triggerBrowserDownload(mode) {
   const a = document.createElement('a')
   a.href = streamUrl(url.value, mode)
@@ -46,30 +39,6 @@ function triggerBrowserDownload(mode) {
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
-}
-
-// 安卓 APP(原生):OkHttp 拉服务端 /stream,按 mime 写入对应 MediaStore 分区。
-// video/mp4 → Movies(相册)、image/* → Pictures(相册)、zip 等 → Download。
-async function triggerNativeDownload(filename, mode, opts = {}) {
-  progress.value = 0
-  progressListener = await SaveToGallery.addListener('saveProgress', (e) => {
-    progress.value = typeof e.percent === 'number' ? e.percent : progress.value
-  })
-  try {
-    await SaveToGallery.saveToGallery({
-      url: streamUrl(url.value, mode),
-      filename,
-      mime: opts.mime || 'video/mp4',
-      album: opts.album || 'movies',
-    })
-    ElMessage.success(opts.successMsg || '已保存到相册:Movies/抖音下载器')
-  } finally {
-    if (progressListener) {
-      await progressListener.remove()
-      progressListener = null
-    }
-    progress.value = -1
-  }
 }
 
 async function handleDownload() {
@@ -107,16 +76,11 @@ async function handleDownload() {
       busy.value = false
       return // 用户取消
     }
-    await runDownload('images', {
-      filename: `${info.filename}.jpg`,
-      mime: 'image/jpeg',
-      album: 'pictures',
-      successMsg: '已保存到相册:Pictures/抖音下载器',
-    })
+    await runDownload('images')
     return
   }
 
-  // 3) 视频:确认框 -> 按平台触发下载
+  // 3) 视频:确认框 -> 触发下载
   try {
     await ElMessageBox.confirm(
       `标题:${info.title}\n文件名:${info.filename}`,
@@ -128,19 +92,15 @@ async function handleDownload() {
     return // 用户取消
   }
 
-  await runDownload(null, { filename: info.filename })
+  await runDownload(null)
 }
 
 // mode:null=视频 / 'images'=图片 / 'video'=图集合成视频;返回是否成功
-async function runDownload(mode, nativeOpts = {}) {
+async function runDownload(mode) {
   busy.value = true
   busyMode.value = mode || 'video'
   try {
-    if (isNative) {
-      await triggerNativeDownload(nativeOpts.filename, mode, nativeOpts)
-    } else {
-      triggerBrowserDownload(mode)
-    }
+    triggerBrowserDownload(mode)
     return true
   } catch (e) {
     ElMessage.error(e.message || '下载失败')
@@ -162,32 +122,9 @@ async function downloadGallery(mode) {
   const info = imageChoice.value
   if (!info || busy.value) return
 
-  let ok
-  if (mode === 'images') {
-    ok = await runDownload('images', {
-      filename: `${info.filename}.zip`,
-      mime: 'application/zip',
-      album: 'downloads',
-      successMsg: '已保存到:Download/抖音下载器',
-    })
-  } else {
-    ok = await runDownload('video', {
-      filename: `${info.filename}.mp4`,
-      successMsg: '已保存到相册:Movies/抖音下载器',
-    })
-  }
+  const ok = await runDownload(mode)
   if (ok) showImageDialog.value = false
 }
-
-onBeforeUnmount(async () => {
-  if (progressListener) {
-    try {
-      await progressListener.remove()
-    } catch (_e) {
-      /* 忽略 */
-    }
-  }
-})
 </script>
 
 <template>
@@ -196,7 +133,7 @@ onBeforeUnmount(async () => {
       <div class="card-header">
         <span>下载视频 / 图集</span>
         <span class="hint">
-          支持抖音视频和图集链接;{{ isNative ? '保存到相册' : '浏览器另存为' }}
+          支持抖音视频和图集链接;浏览器另存为
         </span>
       </div>
     </template>
@@ -213,11 +150,6 @@ onBeforeUnmount(async () => {
       <span class="label">识别到链接:</span><code>{{ url }}</code>
     </div>
 
-    <div v-if="progress >= 0" class="progress">
-      <span class="progress-label">正在保存…{{ progress }}%</span>
-      <el-progress :percentage="progress" :stroke-width="8" :show-text="false" />
-    </div>
-
     <div class="actions">
       <el-button
         type="primary"
@@ -225,7 +157,7 @@ onBeforeUnmount(async () => {
         :disabled="!isValid"
         @click="handleDownload"
       >
-        {{ progress >= 0 ? '下载中…' : '下载' }}
+        下载
       </el-button>
     </div>
 
@@ -305,15 +237,6 @@ onBeforeUnmount(async () => {
 .actions {
   margin-top: 14px;
   text-align: right;
-}
-.progress {
-  margin-top: 14px;
-}
-.progress-label {
-  display: block;
-  font-size: 13px;
-  color: #606266;
-  margin-bottom: 6px;
 }
 .gallery-info .line {
   margin: 6px 0;

@@ -2,7 +2,7 @@
 
 一个基于 **Go 后端 + Vue 前端** 的抖音无水印视频下载器：粘贴抖音链接，在线解析并流式下载视频，无需在服务器落盘。
 
-前端为可安装的 PWA，并可通过 Capacitor 打包成 Android APK。
+前端为可安装的 PWA；安卓端为原生应用（Kotlin + Jetpack Compose），位于 `android-app/`。
 
 ## 功能
 
@@ -10,7 +10,8 @@
 - 流式下载：后端中转视频流，浏览器直接另存为文件，服务器不保存视频
 - 登录鉴权：用户名 / 密码换取 token，接口需带 token 访问
 - 可配置代理、视频清晰度、Cookie
-- PWA：可添加到主屏幕，离线壳 + 实时数据；支持打包 APK
+- PWA：可添加到主屏幕，离线壳 + 实时数据
+- 原生安卓 App（Kotlin + Compose）：视频/图片直接存系统相册 —— `bash build-android-app.sh` 打 APK
 
 ## 技术栈
 
@@ -18,6 +19,7 @@
 |----|------|------|
 | 后端 | Go（`net/http`，纯 Go SQLite `modernc.org/sqlite`，无需 CGO） | `server-go/` |
 | 前端 | Vue 3 + Vite + vite-plugin-pwa | `web/` |
+| 安卓 | Kotlin + Jetpack Compose（原生） | `android-app/` |
 | 前端构建产物 | 静态文件，由 Go 服务 SPA 兜底托管，也由 nginx 容器托管 | `server/static/` |
 | 配置 | YAML（`config.yml`） | 仓库根 |
 | 部署 | edge-nginx（TLS 终结）+ nginx 静态容器 + 宿主机 Go 进程 | `docker/` |

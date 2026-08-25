@@ -1,0 +1,14 @@
+# Gradle
+.gradle/
+build/
+
+# build-android-app.sh 每次生成的镜像配置
+mirror.init.gradle
+
+# Android Studio / local config
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild
+.cxx/

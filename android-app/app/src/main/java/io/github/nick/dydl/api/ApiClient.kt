@@ -106,13 +106,15 @@ object ApiClient {
     /**
      * 构造流式下载 URL,供 MediaStoreDownloader 原生拉取。
      * GET 请求无法携带 Authorization header,所以 token 走 query 参数(同网页版)。
-     * mode:图集专用 —— "images" 下载图片 ZIP / "video" 合成 MP4;视频不传。
+     * mode:图集专用 —— "images" 下载图片 / "video" 合成 MP4;视频不传。
+     * index:mode=images 时可指定只取第 index 张原图(逐张保存进相册)。
      */
-    fun streamUrl(url: String, mode: String? = null): String {
+    fun streamUrl(url: String, mode: String? = null, index: Int? = null): String {
         val sb = StringBuilder("$serverBase/api/v1/stream?url=")
             .append(java.net.URLEncoder.encode(url, "UTF-8"))
             .append("&token=").append(java.net.URLEncoder.encode(token, "UTF-8"))
         if (mode != null) sb.append("&mode=").append(mode)
+        if (index != null) sb.append("&index=").append(index)
         return sb.toString()
     }
 }

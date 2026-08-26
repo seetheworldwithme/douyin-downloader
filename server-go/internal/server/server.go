@@ -373,7 +373,8 @@ func (s *Server) streamVideo(w http.ResponseWriter, r *http.Request, res *resolv
 }
 
 // streamImages serves a gallery post as raw images: a single image is streamed
-// directly, multiple images are packaged into a ZIP on the fly.
+// directly, the index param streams one specific image, and multiple images
+// without index are packaged into a ZIP on the fly.
 func (s *Server) streamImages(w http.ResponseWriter, r *http.Request, res *resolveResult) {
 	defer res.APIClient.Close()
 	ctx := r.Context()
@@ -390,6 +391,35 @@ func (s *Server) streamImages(w http.ResponseWriter, r *http.Request, res *resol
 		return
 	}
 
+	width := max(len(strconv.Itoa(len(res.Images))), 2)
+	entryName := func(i int, ext string) string {
+		return fmt.Sprintf("%s_%0*d%s", res.BaseName, width, i+1, ext)
+	}
+
+	// index 参数:只输出第 index 张原图(安卓端逐张保存进相册,不打包 ZIP)。
+	if idxStr := r.URL.Query().Get("index"); idxStr != "" {
+		idx, convErr := strconv.Atoi(idxStr)
+		if convErr != nil || idx < 0 || idx >= len(res.Images) {
+			writeError(w, 400, "invalid image index")
+			return
+		}
+		data, ctype := firstData, firstType
+		if idx > 0 {
+			data, ctype, err = core.DownloadImage(ctx, res.APIClient, res.Images[idx])
+			if err != nil {
+				writeError(w, 502, fmt.Sprintf("图片下载失败: %v", err))
+				return
+			}
+		}
+		ext := core.ImageExt(data, ctype)
+		setContentDisposition(w, entryName(idx, ext), "image"+ext)
+		w.Header().Set("Content-Type", core.ImageContentType(ext))
+		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+		w.WriteHeader(200)
+		w.Write(data)
+		return
+	}
+
 	if len(res.Images) == 1 {
 		ext := core.ImageExt(firstData, firstType)
 		setContentDisposition(w, res.BaseName+ext, "image"+ext)
@@ -398,14 +428,6 @@ func (s *Server) streamImages(w http.ResponseWriter, r *http.Request, res *resol
 		w.WriteHeader(200)
 		w.Write(firstData)
 		return
-	}
-
-	width := len(strconv.Itoa(len(res.Images)))
-	if width < 2 {
-		width = 2
-	}
-	entryName := func(i int, ext string) string {
-		return fmt.Sprintf("%s_%0*d%s", res.BaseName, width, i+1, ext)
 	}
 
 	setContentDisposition(w, res.BaseName+".zip", "images.zip")

@@ -16,12 +16,15 @@ import java.util.concurrent.TimeUnit
 
 /**
  * 把服务端流式文件写入系统媒体库 —— 移植自 mobile/native/SaveToGalleryPlugin.java,
- * 去掉 Capacitor 插件壳,改为 suspend + Flow<Int>(下载进度 0-100)。
+ * 去掉 Capacitor 插件壳,改为 suspend + Flow<Progress>(下载进度)。
  *
  * mime → MediaStore 分区:视频 → Movies(相册)、图片 → Pictures(相册)、
  * zip 等 → Download。
  */
 class MediaStoreDownloader(private val context: Context) {
+
+    /** 下载进度:有 Content-Length 时上报百分比,否则 indeterminate(界面走流动动画) */
+    data class Progress(val percent: Int, val indeterminate: Boolean = false)
 
     companion object {
         const val FOLDER = "抖音下载器"
@@ -63,12 +66,13 @@ class MediaStoreDownloader(private val context: Context) {
     }
 
     /**
-     * 拉取 url 并写入 MediaStore,emit 进度百分比;失败时删除半成品记录后抛异常。
+     * 拉取 url 并写入 MediaStore,emit 进度(有 Content-Length 为百分比,否则 indeterminate);
+     * 失败时删除半成品记录后抛异常。
      *
      * 图集"合成视频"在服务端要跑 ffmpeg,首字节可能几十秒后才到,
      * 所以读超时给足(它是两次数据包之间的间隔,不是总时长)。
      */
-    fun download(url: String, filename: String, mime: String, album: String): Flow<Int> = flow {
+    fun download(url: String, filename: String, mime: String, album: String): Flow<Progress> = flow {
         val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(300, TimeUnit.SECONDS)
@@ -106,6 +110,7 @@ class MediaStoreDownloader(private val context: Context) {
                     ?: throw IllegalStateException("无法打开输出流")
                 var read = 0L
                 var pct = -1
+                if (total <= 0) emit(Progress(0, indeterminate = true))
                 out.use { sink ->
                     body.byteStream().use { input ->
                         val buf = ByteArray(BUF_SIZE)
@@ -118,7 +123,7 @@ class MediaStoreDownloader(private val context: Context) {
                                 val p = (read * 100 / total).toInt()
                                 if (p != pct) {
                                     pct = p
-                                    emit(pct)
+                                    emit(Progress(pct))
                                 }
                             }
                         }
@@ -132,7 +137,7 @@ class MediaStoreDownloader(private val context: Context) {
                     done.put(MediaStore.MediaColumns.IS_PENDING, 0)
                 }
                 resolver.update(uri, done, null, null)
-                emit(100)
+                emit(Progress(100))
             } catch (e: Exception) {
                 // 失败时删除半成品记录,避免媒体库残留损坏项
                 uri?.let { runCatching { resolver.delete(it, null, null) } }

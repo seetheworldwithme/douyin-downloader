@@ -54,6 +54,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material:material-icons-extended")
 
     // 网络 + JSON(与原 SaveToGalleryPlugin 同源:OkHttp 4.12)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

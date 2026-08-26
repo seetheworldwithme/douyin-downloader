@@ -5,9 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -17,7 +14,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -33,15 +29,20 @@ fun LoginScreen(vm: AppViewModel) {
     var showPassword by rememberSaveable { mutableStateOf(false) }
     val busy by vm.loginBusy.collectAsState()
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("登录", style = MaterialTheme.typography.titleMedium)
+    GlassCard(Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("欢迎回来", style = MaterialTheme.typography.titleLarge)
+                Text("登录后开始下载视频与图集", fontSize = 13.sp, color = HintGray)
+            }
 
             OutlinedTextField(
                 value = username,
                 onValueChange = { username = it },
                 label = { Text("用户名") },
                 singleLine = true,
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                colors = darkTextFieldColors(),
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
@@ -49,6 +50,8 @@ fun LoginScreen(vm: AppViewModel) {
                 onValueChange = { password = it },
                 label = { Text("密码") },
                 singleLine = true,
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                colors = darkTextFieldColors(),
                 visualTransformation =
                     if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
@@ -63,23 +66,13 @@ fun LoginScreen(vm: AppViewModel) {
                 },
                 modifier = Modifier.fillMaxWidth(),
             )
-            Button(
+            GradientButton(
+                text = "登录",
                 onClick = { vm.login(username, password) },
                 enabled = !busy,
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .heightIn(min = 48.dp),
-            ) {
-                if (busy) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.heightIn(max = 20.dp),
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        strokeWidth = 2.dp,
-                    )
-                } else {
-                    Text("登录")
-                }
-            }
+                busy = busy,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

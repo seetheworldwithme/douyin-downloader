@@ -24,7 +24,7 @@ sealed interface DialogState {
     data class VideoConfirm(val info: ResolveInfo) : DialogState
     /** 单图下载确认 */
     data class SingleImageConfirm(val info: ResolveInfo) : DialogState
-    /** 多图图集:选择"下载图片 ZIP"还是"合成视频 MP4" */
+    /** 多图图集:选择"逐张下载图片"还是"合成视频 MP4" */
     data class GalleryChoice(val info: ResolveInfo) : DialogState
 }
 
@@ -46,6 +46,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val busy = MutableStateFlow(false)
     /** 原生下载进度(0-100),-1 表示当前不在下载中 */
     val progress = MutableStateFlow(-1)
+    /** 响应无 Content-Length 时无法算百分比,界面显示流动动画 */
+    val indeterminate = MutableStateFlow(false)
     /** busy 时标记正在下载哪种 mode,用于按钮 loading 态 */
     val busyMode = MutableStateFlow("")
     val dialog = MutableStateFlow<DialogState>(DialogState.None)
@@ -161,25 +163,62 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             DialogState.None -> return
         }
         when (state) {
-            is DialogState.VideoConfirm ->
+            is DialogState.VideoConfirm -> {
+                // 确认即关弹窗(同网页版),进度条在卡片上可见
+                dialog.value = DialogState.None
                 runDownload(info, mode = null, filename = info.filename,
                     mime = "video/mp4", album = "movies",
                     successMsg = "已保存到相册:Movies/${MediaStoreDownloader.FOLDER}")
-            is DialogState.SingleImageConfirm ->
+            }
+            is DialogState.SingleImageConfirm -> {
+                dialog.value = DialogState.None
                 runDownload(info, mode = "images", filename = "${info.filename}.jpg",
                     mime = "image/jpeg", album = "pictures",
                     successMsg = "已保存到相册:Pictures/${MediaStoreDownloader.FOLDER}")
+            }
             is DialogState.GalleryChoice ->
                 if (mode == "images") {
-                    runDownload(info, mode = "images", filename = "${info.filename}.zip",
-                        mime = "application/zip", album = "downloads",
-                        successMsg = "已保存到:Download/${MediaStoreDownloader.FOLDER}")
+                    runImageDownload(info)
                 } else {
                     runDownload(info, mode = "video", filename = "${info.filename}.mp4",
                         mime = "video/mp4", album = "movies",
                         successMsg = "已保存到相册:Movies/${MediaStoreDownloader.FOLDER}")
                 }
             DialogState.None -> {}
+        }
+    }
+
+    /** 多图图集:逐张下载原图保存进相册,进度按总张数折算 */
+    private fun runImageDownload(info: ResolveInfo) {
+        viewModelScope.launch {
+            busy.value = true
+            busyMode.value = "images"
+            progress.value = 0
+            val total = info.image_count.coerceAtLeast(1)
+            val width = total.toString().length.coerceAtLeast(2)
+            try {
+                for (i in 0 until total) {
+                    val name = "%s_%0${width}d.jpg".format(info.filename, i + 1)
+                    val url = ApiClient.streamUrl(pendingUrl, "images", i)
+                    downloader.download(url, name, "image/jpeg", "pictures").collect { p ->
+                        progress.value = (i * 100 + p.percent) / total
+                        indeterminate.value = p.indeterminate
+                    }
+                }
+                notify("已保存到相册:Pictures/${MediaStoreDownloader.FOLDER}($total 张)")
+                dialog.value = DialogState.None
+            } catch (e: AuthExpiredException) {
+                onAuthExpired()
+            } catch (e: Exception) {
+                notify(e.message ?: "下载失败")
+                // 图集弹窗失败保留,便于换另一种方式重试
+                if (dialog.value !is DialogState.GalleryChoice) dialog.value = DialogState.None
+            } finally {
+                busy.value = false
+                busyMode.value = ""
+                progress.value = -1
+                indeterminate.value = false
+            }
         }
     }
 
@@ -198,7 +237,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val url = ApiClient.streamUrl(pendingUrl, mode)
                 downloader.download(url, filename, mime, album).collect { p ->
-                    progress.value = p
+                    progress.value = p.percent
+                    indeterminate.value = p.indeterminate
                 }
                 notify(successMsg)
                 dialog.value = DialogState.None
@@ -212,6 +252,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 busy.value = false
                 busyMode.value = ""
                 progress.value = -1
+                indeterminate.value = false
             }
         }
     }

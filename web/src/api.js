@@ -76,11 +76,10 @@ export function streamUrl(url, mode) {
   return `${getServerBase()}/api/v1/stream?${new URLSearchParams(params).toString()}`
 }
 
-// 创建用户主页批量扫描任务。后端异步分页读取作品并写入 SQLite。
-export function createBatchJob(url, maxItems = 50, incremental = true) {
+export function createBatchJob(url, maxItems = 50, incremental = true, mode = 'post') {
   return request('/jobs', {
     method: 'POST',
-    body: JSON.stringify({ url, max_items: maxItems, incremental }),
+    body: JSON.stringify({ url, mode, max_items: maxItems, incremental }),
   })
 }
 
@@ -92,8 +91,26 @@ export function listBatchJobs() {
   return request('/jobs')
 }
 
-export function getHistory(limit = 100) {
-  return request(`/history?limit=${encodeURIComponent(limit)}`)
+export function retryBatchJob(jobId) {
+  return request(`/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' })
+}
+
+// 真正批量下载:后端把选中作品边拉取边写入 ZIP,不长期落服务器磁盘。
+export function batchStreamUrl(jobId, awemeIds = []) {
+  const params = { job_id: jobId, token: getToken() }
+  if (awemeIds && awemeIds.length) params.ids = awemeIds.join(',')
+  return `${getServerBase()}/api/v1/batch/stream?${new URLSearchParams(params).toString()}`
+}
+
+export function getHistory({ limit = 100, offset = 0, q = '', type = '', author = '' } = {}) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  })
+  if (q) params.set('q', q)
+  if (type && type !== 'all') params.set('type', type)
+  if (author) params.set('author', author)
+  return request(`/history?${params.toString()}`)
 }
 
 export function getCookieStatus() {

@@ -95,10 +95,17 @@ export function retryBatchJob(jobId) {
   return request(`/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' })
 }
 
-// 真正批量下载:后端把选中作品边拉取边写入 ZIP,不长期落服务器磁盘。
-export function batchStreamUrl(jobId, awemeIds = []) {
-  const params = { job_id: jobId, token: getToken() }
-  if (awemeIds && awemeIds.length) params.ids = awemeIds.join(',')
+// 先用 POST 发送完整选择列表，后端返回短期 ticket，避免数百个 aweme_id
+// 塞进 GET URL 导致 nginx/browser request-line 过长。
+export function prepareBatchDownload(jobId, awemeIds = []) {
+  return request('/batch/prepare', {
+    method: 'POST',
+    body: JSON.stringify({ job_id: jobId, ids: awemeIds }),
+  })
+}
+
+export function batchStreamUrl(ticket) {
+  const params = { ticket, token: getToken() }
   return `${getServerBase()}/api/v1/batch/stream?${new URLSearchParams(params).toString()}`
 }
 

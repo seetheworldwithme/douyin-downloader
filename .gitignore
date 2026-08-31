@@ -13,6 +13,8 @@ Downloaded/
 Transcripts/
 dy_downloader.db
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 
@@ -38,6 +40,9 @@ config/cookies.json
 web/node_modules/
 web/dist/
 server/static/
+
+# Playwright helper deps (tools/)
+tools/node_modules/
 
 # Android APK build output (build-android-app.sh 产物)
 release/

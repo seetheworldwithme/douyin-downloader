@@ -54,6 +54,27 @@ type BatchService struct {
 	jobs map[string]*BatchJob
 }
 
+var batchServices sync.Map
+
+func attachBatchService(s *Server, deps *ServerDeps) *BatchService {
+	b := NewBatchService(deps)
+	batchServices.Store(s, b)
+	return b
+}
+
+func batchServiceFor(s *Server) *BatchService {
+	if v, ok := batchServices.Load(s); ok {
+		return v.(*BatchService)
+	}
+	return nil
+}
+
+func detachBatchService(s *Server) {
+	if v, ok := batchServices.LoadAndDelete(s); ok {
+		v.(*BatchService).Close()
+	}
+}
+
 func NewBatchService(deps *ServerDeps) *BatchService {
 	b := &BatchService{deps: deps, jobs: make(map[string]*BatchJob)}
 	if deps.Config.Config.Database {
@@ -88,15 +109,9 @@ func (b *BatchService) Create(rawURL string, maxItems int, incremental bool) *Ba
 	if maxItems > 500 {
 		maxItems = 500
 	}
-	job := &BatchJob{
-		JobID:       newJobID(),
-		URL:         strings.TrimSpace(rawURL),
-		Status:      "queued",
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
-		Incremental: incremental,
-		MaxItems:    maxItems,
-		Items:       []BatchItem{},
-	}
+	job := &BatchJob{JobID: newJobID(), URL: strings.TrimSpace(rawURL), Status: "queued",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339), Incremental: incremental,
+		MaxItems: maxItems, Items: []BatchItem{}}
 	b.mu.Lock()
 	b.jobs[job.JobID] = job
 	b.mu.Unlock()
@@ -166,25 +181,11 @@ func (b *BatchService) persist(job *BatchJob) {
 		return
 	}
 	cp := *job
-	if err := b.db.UpsertJob(storage.JobRecord{
-		JobID:          cp.JobID,
-		URL:            cp.URL,
-		Status:         cp.Status,
-		CreatedAt:      cp.CreatedAt,
-		StartedAt:      cp.StartedAt,
-		FinishedAt:     cp.FinishedAt,
-		Total:          int64(cp.Total),
-		Success:        int64(cp.Success),
-		Failed:         int64(cp.Failed),
-		Skipped:        int64(cp.Skipped),
-		Error:          cp.Error,
-		AuthorNickname: cp.AuthorNickname,
-		AuthorSecUID:   cp.AuthorSecUID,
-		Overrides: map[string]any{
-			"incremental": cp.Incremental,
-			"max_items":   cp.MaxItems,
-		},
-	}); err != nil {
+	if err := b.db.UpsertJob(storage.JobRecord{JobID: cp.JobID, URL: cp.URL, Status: cp.Status,
+		CreatedAt: cp.CreatedAt, StartedAt: cp.StartedAt, FinishedAt: cp.FinishedAt,
+		Total: int64(cp.Total), Success: int64(cp.Success), Failed: int64(cp.Failed), Skipped: int64(cp.Skipped),
+		Error: cp.Error, AuthorNickname: cp.AuthorNickname, AuthorSecUID: cp.AuthorSecUID,
+		Overrides: map[string]any{"incremental": cp.Incremental, "max_items": cp.MaxItems}}); err != nil {
 		slog.Warn("persist batch job failed", "job_id", cp.JobID, "error", err)
 	}
 }
@@ -229,13 +230,11 @@ func (b *BatchService) run(id string) {
 	if job == nil {
 		return
 	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
 	apiClient := core.NewDouyinAPIClient(b.deps.CookieMgr.GetCookies(), b.deps.Config.Config.Proxy)
 	defer apiClient.Close()
-
 	rawURL := job.URL
 	if utils.IsShortURL(rawURL) {
 		resolved, err := apiClient.ResolveShortURL(ctx, utils.NormalizeShortURL(rawURL))
@@ -249,7 +248,6 @@ func (b *BatchService) run(id string) {
 		}
 		rawURL = resolved
 	}
-
 	parsed := core.ParseURL(rawURL)
 	if parsed == nil || parsed.Type != "user" || parsed.SecUID == "" {
 		b.fail(id, fmt.Errorf("批量任务仅支持抖音用户主页链接"))
@@ -262,10 +260,7 @@ func (b *BatchService) run(id string) {
 		return
 	}
 	nickname := stringValue(profile, "nickname")
-	b.update(id, func(job *BatchJob) {
-		job.AuthorNickname = nickname
-		job.AuthorSecUID = parsed.SecUID
-	})
+	b.update(id, func(job *BatchJob) { job.AuthorNickname, job.AuthorSecUID = nickname, parsed.SecUID })
 
 	var baseline int64
 	if job.Incremental && b.db != nil {
@@ -280,7 +275,6 @@ func (b *BatchService) run(id string) {
 			break
 		}
 		seenCursor[cursor] = true
-
 		resp, err := apiClient.GetUserPost(ctx, parsed.SecUID, cursor, 20)
 		if err != nil {
 			b.fail(id, fmt.Errorf("获取主页作品失败: %w", err))
@@ -289,7 +283,6 @@ func (b *BatchService) run(id string) {
 		if len(resp.Items) == 0 {
 			break
 		}
-
 		for _, raw := range resp.Items {
 			awemeID := stringValue(raw, "aweme_id")
 			if awemeID == "" {
@@ -300,7 +293,6 @@ func (b *BatchService) run(id string) {
 				stop = true
 				break
 			}
-
 			known := false
 			if b.db != nil {
 				known, _ = b.db.HasAweme(awemeID)
@@ -309,45 +301,28 @@ func (b *BatchService) run(id string) {
 				b.update(id, func(j *BatchJob) { j.Skipped++ })
 				continue
 			}
-
 			title := strings.TrimSpace(stringValue(raw, "desc"))
 			if title == "" {
 				title = awemeID
 			}
-			item := BatchItem{
-				AwemeID:    awemeID,
-				Title:      title,
-				Type:       awemeKind(raw),
-				CreateTime: createTime,
-				URL:        "https://www.douyin.com/video/" + awemeID,
-				Known:      known,
-			}
-
+			item := BatchItem{AwemeID: awemeID, Title: title, Type: awemeKind(raw), CreateTime: createTime,
+				URL: "https://www.douyin.com/video/" + awemeID, Known: known}
 			if b.db != nil {
 				metadata, _ := json.Marshal(raw)
-				_ = b.db.RecordDownload(storage.AwemeRecord{
-					AwemeID:      awemeID,
-					AwemeType:    item.Type,
-					Title:        title,
-					AuthorName:   nickname,
-					AuthorSecUID: parsed.SecUID,
-					CreateTime:   sql.NullInt64{Int64: createTime, Valid: createTime > 0},
-					Metadata:     string(metadata),
-					JobID:        id,
-				})
+				_ = b.db.RecordDownload(storage.AwemeRecord{AwemeID: awemeID, AwemeType: item.Type, Title: title,
+					AuthorName: nickname, AuthorSecUID: parsed.SecUID,
+					CreateTime: sql.NullInt64{Int64: createTime, Valid: createTime > 0}, Metadata: string(metadata), JobID: id})
 			}
-
-			b.update(id, func(j *BatchJob) {
+			current := b.update(id, func(j *BatchJob) {
 				j.Items = append(j.Items, item)
 				j.Total = len(j.Items) + j.Skipped
 				j.Success = len(j.Items)
 			})
-			if len(b.snapshot(id).Items) >= job.MaxItems {
+			if current != nil && len(current.Items) >= job.MaxItems {
 				stop = true
 				break
 			}
 		}
-
 		if stop || !resp.HasMore || resp.MaxCursor == cursor {
 			break
 		}
@@ -372,6 +347,11 @@ type createBatchRequest struct {
 }
 
 func (s *Server) handleCreateBatchJob(w http.ResponseWriter, r *http.Request) {
+	b := batchServiceFor(s)
+	if b == nil {
+		writeError(w, 503, "batch service unavailable")
+		return
+	}
 	var req createBatchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, 400, "invalid request body")
@@ -381,15 +361,25 @@ func (s *Server) handleCreateBatchJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "url is required")
 		return
 	}
-	writeJSON(w, http.StatusAccepted, s.batch.Create(req.URL, req.MaxItems, req.Incremental))
+	writeJSON(w, http.StatusAccepted, b.Create(req.URL, req.MaxItems, req.Incremental))
 }
 
 func (s *Server) handleListBatchJobs(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"items": s.batch.List()})
+	b := batchServiceFor(s)
+	if b == nil {
+		writeError(w, 503, "batch service unavailable")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": b.List()})
 }
 
 func (s *Server) handleGetBatchJob(w http.ResponseWriter, r *http.Request) {
-	job := s.batch.snapshot(r.PathValue("id"))
+	b := batchServiceFor(s)
+	if b == nil {
+		writeError(w, 503, "batch service unavailable")
+		return
+	}
+	job := b.snapshot(r.PathValue("id"))
 	if job == nil {
 		writeError(w, 404, "job not found")
 		return
@@ -398,12 +388,13 @@ func (s *Server) handleGetBatchJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
-	if s.batch.db == nil {
+	b := batchServiceFor(s)
+	if b == nil || b.db == nil {
 		writeJSON(w, 200, map[string]any{"items": []any{}})
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	items, err := s.batch.db.ListRecentAwemes(limit)
+	items, err := b.db.ListRecentAwemes(limit)
 	if err != nil {
 		writeError(w, 500, fmt.Sprintf("读取历史失败: %v", err))
 		return
@@ -411,17 +402,12 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"items": items})
 }
 
-type cookieImportRequest struct {
-	Cookie string `json:"cookie"`
-}
+type cookieImportRequest struct { Cookie string `json:"cookie"` }
 
 func (s *Server) handleCookieStatus(w http.ResponseWriter, r *http.Request) {
 	cookies := s.deps.CookieMgr.GetCookies()
-	writeJSON(w, 200, map[string]any{
-		"configured": len(cookies) > 0,
-		"valid":      s.deps.CookieMgr.ValidateCookies(),
-		"count":      len(cookies),
-	})
+	writeJSON(w, 200, map[string]any{"configured": len(cookies) > 0,
+		"valid": s.deps.CookieMgr.ValidateCookies(), "count": len(cookies)})
 }
 
 func (s *Server) handleCookieImport(w http.ResponseWriter, r *http.Request) {
@@ -436,9 +422,5 @@ func (s *Server) handleCookieImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deps.CookieMgr.SetCookies(cookies)
-	writeJSON(w, 200, map[string]any{
-		"ok":    true,
-		"valid": s.deps.CookieMgr.ValidateCookies(),
-		"count": len(cookies),
-	})
+	writeJSON(w, 200, map[string]any{"ok": true, "valid": s.deps.CookieMgr.ValidateCookies(), "count": len(cookies)})
 }

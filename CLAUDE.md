@@ -1,13 +1,28 @@
-# douyin-downloader Claude Guidance
+# Claude Code Notes
 
-Read `AGENTS.md` for the full project rules.
+This repository is a Go + Vue Douyin downloader.
 
-## Architecture
+Key workflows:
 
-- **Backend**: Go server in `server-go/` (module `github.com/xuziyue/douyin-downloader`).
-  Entry point `server-go/cmd/server/main.go`; REST API under `server-go/internal/server/`.
-- **Frontend**: Vue + Vite app in `web/`, built output lands in `server/static/`
-  (served by the Go server's SPA fallback and by the nginx container in `docker/`).
-- **Android**: Kotlin + Compose 原生应用在 `android-app/`（独立于 web 前端），
-  打包脚本 `build-android-app.sh`（Git Bash），产物 `release/apk/`。
-- **Config**: `config.yml` (YAML) + `.cookies.json` / `config/cookies.json` — read by the Go server.
+- Single video/gallery: `/api/v1/resolve` + `/api/v1/stream`
+- Batch scan: `/api/v1/jobs` with `mode=post|like|mix`
+- Batch ZIP: `/api/v1/batch/stream`
+- Task center: `/api/v1/jobs`, persisted in SQLite
+- Media library: `/api/v1/history`
+- Cookie management: `/api/v1/cookies/status`, `/api/v1/cookies/import`
+
+Web UI tabs live in `web/src/App.vue` and use:
+
+- `SubmitCard.vue`
+- `BatchCard.vue`
+- `TaskCenter.vue`
+- `HistoryCard.vue`
+
+Before committing backend/frontend changes run:
+
+```bash
+cd server-go && go test ./... && go vet ./... && go build ./...
+cd ../web && npm ci && npm run build
+```
+
+GitHub Actions runs these checks for pull requests.

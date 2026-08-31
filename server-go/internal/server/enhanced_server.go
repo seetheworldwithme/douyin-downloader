@@ -40,6 +40,13 @@ func NewEnhanced(deps *ServerDeps, host string, port int) *Server {
 		}
 		writeError(w, 405, "method not allowed")
 	})
+	mux.HandleFunc("/api/v1/batch/prepare", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			s.requireUser(s.handlePrepareBatchStream)(w, r)
+			return
+		}
+		writeError(w, 405, "method not allowed")
+	})
 	mux.HandleFunc("/api/v1/batch/stream", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			s.requireUser(s.handleBatchStream)(w, r)

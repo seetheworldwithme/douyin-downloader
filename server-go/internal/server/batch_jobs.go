@@ -277,6 +277,15 @@ func (b *BatchService) run(id string) {
 		seenCursor[cursor] = true
 		resp, err := apiClient.GetUserPost(ctx, parsed.SecUID, cursor, 20)
 		if err != nil {
+			if page == 0 {
+				if fallbackErr := b.tryBrowserFallback(ctx, id, rawURL, parsed.SecUID, nickname, job.MaxItems, job.Incremental); fallbackErr == nil {
+					slog.Info("user API blocked; Playwright fallback succeeded", "job_id", id)
+					stop = true
+					break
+				} else {
+					slog.Warn("Playwright fallback unavailable", "job_id", id, "error", fallbackErr)
+				}
+			}
 			b.fail(id, fmt.Errorf("获取主页作品失败: %w", err))
 			return
 		}

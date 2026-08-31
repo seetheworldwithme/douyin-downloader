@@ -52,51 +52,9 @@ func zipWriteError(zw *zip.Writer, item BatchItem, err error) {
 	_ = zipWriteBytes(zw, name, []byte(fmt.Sprintf("%s\n%s\n%v\n", item.Title, item.URL, err)))
 }
 
-func (s *Server) streamBatchVideo(zw *zip.Writer, item BatchItem, res *resolveResult, index, total int) error {
-	info := res.Video
-	if info == nil {
-		return fmt.Errorf("视频地址为空")
-	}
-	req, err := http.NewRequestWithContext(sContext(res, nil), http.MethodGet, info.VideoURL, nil)
-	if err != nil {
-		return err
-	}
-	for k, v := range info.VideoHdrs {
-		req.Header.Set(k, v)
-	}
-	resp, err := res.APIClient.Client().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("上游返回 %d", resp.StatusCode)
-	}
-	width := len(strconv.Itoa(total))
-	base := utils.SanitizeFilename(item.Title, 70)
-	if base == "" {
-		base = item.AwemeID
-	}
-	name := fmt.Sprintf("%0*d_%s_%s.mp4", width, index+1, base, item.AwemeID)
-	hdr := &zip.FileHeader{Name: name, Method: zip.Store, Modified: time.Now()}
-	hdr.SetMode(0o644)
-	w, err := zw.CreateHeader(hdr)
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(w, resp.Body)
-	return err
-}
-
-// sContext exists only to keep batch streaming tied to the request context.
-// The nil fallback is never used by the handler, but keeps the helper compact.
-func sContext(res *resolveResult, fallback interface{ Done() <-chan struct{} }) interface{ Done() <-chan struct{} } {
-	if fallback != nil {
-		return fallback
-	}
-	return nil
-}
-
+// handleBatchStream streams selected results as a ZIP archive. Media is fetched
+// from Douyin and written directly into the response; the server does not keep
+// persistent copies. Gallery posts are stored as image folders inside the ZIP.
 func (s *Server) handleBatchStream(w http.ResponseWriter, r *http.Request) {
 	b := batchServiceFor(s)
 	if b == nil {

@@ -4,7 +4,9 @@ import process from 'node:process'
 import { chromium } from 'playwright'
 
 const output = path.resolve(process.argv[2] || '.cookies.json')
-const required = ['ttwid', 'odin_tt', 'passport_csrf_token']
+// ttwid/odin_tt are set for anonymous visitors too; sessionid only appears
+// after a real login, so it is the actual completion signal.
+const required = ['ttwid', 'odin_tt', 'passport_csrf_token', 'sessionid']
 
 const browser = await chromium.launch({ headless: false })
 try {

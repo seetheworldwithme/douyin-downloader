@@ -17,6 +17,11 @@ try {
   cookies = {}
 }
 
+// Tunables forwarded by the Go server (server-go/internal/browser/fallback.go).
+const maxScrolls = Math.max(1, Number(process.env.DOUYIN_BROWSER_MAX_SCROLLS || 120))
+const idleStop = Math.max(1, Number(process.env.DOUYIN_BROWSER_IDLE_ROUNDS || 6))
+const gotoTimeoutMs = Math.max(5, Number(process.env.DOUYIN_BROWSER_WAIT_TIMEOUT_SECONDS || 60)) * 1000
+
 const browser = await chromium.launch({ headless })
 try {
   const context = await browser.newContext({
@@ -38,13 +43,13 @@ try {
   if (cookieEntries.length) await context.addCookies(cookieEntries)
 
   const page = await context.newPage()
-  await page.goto(userUrl, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await page.goto(userUrl, { waitUntil: 'domcontentloaded', timeout: gotoTimeoutMs })
   await page.waitForTimeout(1500)
 
   const found = new Map()
   let idleRounds = 0
   let previousSize = 0
-  for (let round = 0; round < 120 && found.size < maxItems; round++) {
+  for (let round = 0; round < maxScrolls && found.size < maxItems; round++) {
     const links = await page.locator('a[href*="/video/"], a[href*="/note/"], a[href*="/gallery/"]').evaluateAll((nodes) =>
       nodes.map((node) => node.href || node.getAttribute('href') || ''),
     )
@@ -66,9 +71,20 @@ try {
     if (found.size === previousSize) idleRounds += 1
     else idleRounds = 0
     previousSize = found.size
-    if (idleRounds >= 6) break
+    if (idleRounds >= idleStop) break
 
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    // Douyin's author page scrolls inside a nested container
+    // (.route-scroll-container), not the window; scrolling window alone
+    // never triggers lazy loading.
+    await page.evaluate(() => {
+      const container =
+        document.querySelector('.route-scroll-container') ||
+        [...document.querySelectorAll('div')].find(
+          (el) => el.scrollHeight > el.clientHeight + 50 && el.clientHeight > 0,
+        )
+      if (container) container.scrollTop = container.scrollHeight
+      else window.scrollTo(0, document.body.scrollHeight)
+    })
     await page.waitForTimeout(900)
   }
 

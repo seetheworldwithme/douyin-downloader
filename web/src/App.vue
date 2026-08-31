@@ -3,9 +3,10 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { getHealth, getToken, clearToken } from './api'
 import LoginCard from './components/LoginCard.vue'
 import SubmitCard from './components/SubmitCard.vue'
+import BatchCard from './components/BatchCard.vue'
 
 const loggedIn = ref(!!getToken())
-const health = ref('unknown') // unknown / online / offline
+const health = ref('unknown')
 let healthTimer = null
 
 async function checkHealth() {
@@ -24,7 +25,6 @@ function logout() {
   clearToken()
   loggedIn.value = false
 }
-// token 过期(api.js 在 401 时派发)→ 自动退回登录页
 function onAuthExpired() {
   loggedIn.value = false
 }
@@ -60,19 +60,17 @@ onBeforeUnmount(() => {
 
     <main class="app-main">
       <LoginCard v-if="!loggedIn" @logged-in="onLoggedIn" />
-      <SubmitCard v-else />
+      <template v-else>
+        <SubmitCard />
+        <BatchCard />
+      </template>
     </main>
   </div>
 </template>
 
 <style>
-* {
-  box-sizing: border-box;
-}
-/* 触摸目标放大到安卓 Material 推荐的 ≥40dp;不影响 header 里的 text 按钮 */
-.el-button:not(.is-text):not(.is-link) {
-  min-height: 40px;
-}
+* { box-sizing: border-box; }
+.el-button:not(.is-text):not(.is-link) { min-height: 40px; }
 html,
 body {
   margin: 0;
@@ -82,13 +80,11 @@ body {
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   color: #303133;
 }
-/* dvh:移动端动态工具栏下更可靠;100vh 在 WebView 里会偏大 */
 .app {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
-/* 顶部留状态栏、左右留圆角/刘海安全区(安卓 15 edge-to-edge) */
 .app-header {
   background: #fff;
   border-bottom: 1px solid #ebeef5;
@@ -109,9 +105,7 @@ body {
   align-items: center;
   gap: 8px;
 }
-.logo {
-  font-size: 22px;
-}
+.logo { font-size: 22px; }
 .header-right {
   display: flex;
   align-items: center;
@@ -141,11 +135,10 @@ body {
 }
 .app-main {
   flex: 1;
-  max-width: 760px;
+  max-width: 900px;
   width: 100%;
   margin: 0 auto;
   padding-top: 24px;
-  /* 底部留出手势导航条安全区 */
   padding-bottom: max(24px, env(safe-area-inset-bottom));
   padding-left: max(24px, env(safe-area-inset-left));
   padding-right: max(24px, env(safe-area-inset-right));
@@ -158,11 +151,7 @@ body {
     padding-left: max(12px, env(safe-area-inset-left));
     padding-right: max(12px, env(safe-area-inset-right));
   }
-  .title {
-    font-size: 15px;
-  }
-  .header-right {
-    gap: 8px;
-  }
+  .title { font-size: 15px; }
+  .header-right { gap: 8px; }
 }
 </style>

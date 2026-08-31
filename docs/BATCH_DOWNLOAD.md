@@ -1,59 +1,150 @@
-# Web 批量下载与任务中心
+# Web 批量下载、任务中心与作品库
 
-本分支在原有「单视频 / 图集解析 + 流式下载」能力之上增加作者主页批量扫描、SQLite 增量去重、异步任务中心、浏览器兜底和 Cookie 管理。
+本分支在原有「单视频 / 图集解析 + 流式下载」能力之上增加完整的 Web 批量工作流：作者发布/点赞扫描、合集扫描、SQLite 增量去重、真正的 ZIP 批量下载、持久化任务中心、作品库筛选、浏览器兜底和 Cookie 管理。
 
-## Web 使用
+## Web 页面
 
-登录 Web 后，原下载卡片下方会出现「主页批量下载」工作区：
+登录后页面分为四个工作区：
 
-1. 粘贴 `https://www.douyin.com/user/<sec_uid>` 作者主页链接。
-2. 设置最多扫描条数（1–500）。
-3. 默认开启「增量模式」。开启后，数据库中已经发现过的作品会跳过；再次扫描同一作者时主要返回新作品。
-4. 点击「开始扫描」。前端创建异步任务并轮询任务状态，不会长时间占住一次 HTTP 请求。
-5. 扫描结束后可直接对每条视频 / 图集复用现有 `/api/v1/stream` 接口下载，视频仍然是服务端中转流，不在服务器持久化视频文件。
+1. **链接下载**：保留原来的单视频 / 图集下载。
+2. **批量下载**：扫描作者发布、点赞或合集，支持全选/多选并流式下载 ZIP。
+3. **任务中心**：查看运行中和历史任务，失败/中断任务可重新执行。
+4. **作品库**：查询 SQLite 中已发现作品，按关键词、作者和类型筛选并重新下载。
+
+## 批量下载
+
+### 作者发布
+
+粘贴：
+
+```text
+https://www.douyin.com/user/<sec_uid>
+```
+
+内容类型选择「发布作品」。
+
+### 作者点赞
+
+使用相同作者主页链接，内容类型选择「点赞作品」。点赞列表是否可访问取决于目标账号可见性以及当前 Cookie 权限。
+
+### 合集
+
+粘贴：
+
+```text
+https://www.douyin.com/collection/<mix_id>
+https://www.douyin.com/mix/<mix_id>
+```
+
+页面会自动使用合集模式。
+
+### 真正批量下载
+
+扫描完成后作品默认全部选中，也可以取消或重新选择。点击「下载选中 ZIP」后：
+
+```text
+浏览器
+  ↓ GET /api/v1/batch/stream
+Go 服务
+  ↓ 逐个解析作品
+Douyin CDN
+  ↓ 边下载边写 ZIP
+浏览器下载
+```
+
+视频直接写入 ZIP；图集以子目录形式写入原图。整个过程不会把媒体长期保存到服务器磁盘。单项失败时 ZIP 内会增加 `errors/<aweme_id>.txt`，其他作品继续处理。
 
 ## 新增 API
 
-均位于 `/api/v1`，除登录外均沿用现有 token 鉴权。
+均位于 `/api/v1`，沿用现有 token 鉴权。
 
 | 方法 | 路径 | 作用 |
 |---|---|---|
-| POST | `/jobs` | 创建作者主页扫描任务 |
-| GET | `/jobs` | 查看当前进程中的最近任务 |
-| GET | `/jobs/{id}` | 查看任务状态与发现的作品 |
-| GET | `/history?limit=100` | 查看 SQLite 中最近发现的作品 |
-| GET | `/cookies/status` | 查看 Cookie 是否已配置/基础校验是否通过 |
+| POST | `/jobs` | 创建批量扫描任务 |
+| GET | `/jobs` | 查看运行中 + SQLite 历史任务 |
+| GET | `/jobs/{id}` | 查看任务状态与当前进程中的作品结果 |
+| POST | `/jobs/{id}/retry` | 使用原 URL / mode / maxItems / incremental 重新执行 |
+| GET | `/batch/stream?job_id=...&ids=...` | 把选中作品流式打包 ZIP |
+| GET | `/history` | 查询作品库，支持筛选 |
+| GET | `/cookies/status` | 查看 Cookie 状态 |
 | POST | `/cookies/import` | 导入浏览器 Cookie 请求头 |
 
-创建任务示例：
+创建作者发布任务：
 
 ```json
 {
   "url": "https://www.douyin.com/user/MS4wLjAB...",
+  "mode": "post",
   "max_items": 50,
   "incremental": true
 }
 ```
 
-任务状态：`queued` → `running` → `completed` / `failed`。
+作者点赞：
 
-## SQLite 去重与增量
+```json
+{
+  "url": "https://www.douyin.com/user/MS4wLjAB...",
+  "mode": "like",
+  "max_items": 50,
+  "incremental": true
+}
+```
 
-扫描到的作品元数据会写入现有 `aweme` 表，但不会伪造 `file_path`。因此：
+合集：
 
-- `HasAweme()` 用于“是否已经发现过”的增量判断；
-- 原有 `IsDownloaded()` 仍只把真正存在下载路径的记录视作“已下载”；
-- 同一作者再次增量扫描时，会使用 `author_sec_uid + create_time` 作为快速停止基线，并同时用 `aweme_id` 做精确去重。
+```json
+{
+  "url": "https://www.douyin.com/collection/1234567890",
+  "mode": "mix",
+  "max_items": 100,
+  "incremental": true
+}
+```
 
-## API 重试
+任务状态：
 
-正常链路继续复用 `core.DouyinAPIClient.RequestJSON()` 的指数退避重试（1s / 2s / 5s）。只有主页 API 在首屏连续失败时，才尝试 Playwright 浏览器兜底。
+```text
+queued -> running -> completed / failed
+```
 
-## Playwright 浏览器兜底（可选）
+如果服务在任务运行时重启，SQLite 中原来的 `queued/running` 记录会在任务中心显示为 `interrupted`，可直接重新执行。
 
-Go 服务本身不新增浏览器依赖。只有需要兜底时才调用 `tools/browser-fallback.mjs`。
+## SQLite 去重与任务持久化
 
-安装：
+扫描到的作品元数据写入现有 `aweme` 表，但不会伪造 `file_path`：
+
+- `HasAweme()`：判断作品是否已经发现过；
+- `IsDownloaded()`：仍只把存在真实 `file_path` 的记录视为已下载；
+- 发布作品增量模式使用 `author_sec_uid + create_time` 快速停止，同时用 `aweme_id` 精确去重；
+- 点赞/合集增量主要使用 `aweme_id` 去重，因为作品作者和时间线并不等同于被扫描账号；
+- `job` 表持久化 `mode / incremental / max_items`，服务重启后任务中心仍可展示并重新执行。
+
+## 作品库筛选
+
+`GET /api/v1/history` 支持：
+
+```text
+q       标题 / 作者 / aweme_id 模糊搜索
+author  作者模糊筛选
+type    video / images
+limit   1-500
+offset  偏移量
+```
+
+Web「作品库」提供对应搜索框、作者筛选、类型筛选和重新下载按钮。
+
+## API 重试与浏览器兜底
+
+正常链路继续复用 `core.DouyinAPIClient.RequestJSON()` 的指数退避：
+
+```text
+1s -> 2s -> 5s
+```
+
+发布作品主页 API 在首屏连续失败时，可选尝试 Playwright 浏览器兜底。点赞和合集目前主要依赖 Web API，这与参考项目当前的能力边界一致。
+
+安装可选浏览器依赖：
 
 ```bash
 cd tools
@@ -61,7 +152,7 @@ npm install
 npx playwright install chromium
 ```
 
-确保 `config.yml` 中启用：
+`config.yml`：
 
 ```yaml
 browser_fallback:
@@ -69,29 +160,13 @@ browser_fallback:
   headless: true
 ```
 
-工作流程：
+## Cookie
 
-```text
-Douyin Web API
-    ↓ 失败/风控
-Node + Playwright Chromium
-    ↓
-滚动作者主页，收集 video / note / gallery 链接
-    ↓
-写入同一任务与 SQLite 去重流程
-```
+### Web 导入
 
-如果 Node、Playwright 或 Chromium 未安装，服务不会启动失败；只是兜底不可用，并保留正常 API 链路的错误信息。
+在「批量下载」页面右上角点击 Cookie，粘贴已登录浏览器请求里的完整 Cookie 请求头。后端解析后写入 `.cookies.json`，原始 Cookie 字符串不会返回给前端。
 
-## 自动获取 Cookie
-
-### 方式一：Web 导入
-
-在「主页批量下载」卡片右上角点击 Cookie，粘贴已登录浏览器请求中的完整 `Cookie` 请求头。后端解析后保存到 `.cookies.json`（0600 权限）。
-
-### 方式二：浏览器辅助登录
-
-在项目根目录执行：
+### 浏览器辅助登录
 
 ```bash
 cd tools
@@ -101,16 +176,29 @@ cd ..
 node tools/cookie-login.mjs .cookies.json
 ```
 
-脚本会打开抖音网页。完成登录后，它检测到 `ttwid`、`odin_tt`、`passport_csrf_token` 等关键 Cookie 后自动写入 `.cookies.json` 并退出。
+登录完成后脚本自动提取 Cookie 并保存。不要把 `.cookies.json` 提交到 Git。
 
-> 在远程无桌面服务器上，推荐先在本地执行登录脚本，再安全地把 `.cookies.json` 放到服务器配置目录；不要提交 Cookie 到 Git。
+## CI
+
+本分支新增 `.github/workflows/ci.yml`。每个 PR 自动执行：
+
+```text
+Go backend:
+  go test ./...
+  go vet ./...
+  go build ./...
+
+Vue frontend:
+  npm ci
+  npm run build
+```
 
 ## 部署
 
-仍然使用原来的：
+仍使用原来的：
 
 ```bash
 bash start.sh
 ```
 
-`cmd/server` 已切换为增强版 Server，原 `/health`、`/login`、`/resolve`、`/stream` 和 SPA 行为保持不变。
+原 `/health`、`/login`、`/resolve`、`/stream` 行为保持不变，新功能作为增强层挂载。

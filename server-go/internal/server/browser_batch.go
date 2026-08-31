@@ -4,11 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 
 	browserfallback "github.com/xuziyue/douyin-downloader/internal/browser"
 	"github.com/xuziyue/douyin-downloader/internal/config"
+	"github.com/xuziyue/douyin-downloader/internal/core"
 	"github.com/xuziyue/douyin-downloader/internal/storage"
 )
 
@@ -81,7 +85,12 @@ func (b *BatchService) tryBrowserFallback(ctx context.Context, id, userURL, secU
 		return err
 	}
 
-	for _, raw := range items {
+	// The scraper only yields IDs and URLs; fetch desc/create_time via the
+	// detail API (still reachable unsigned) so the UI shows real titles and
+	// dates, and the incremental baseline works for fallback-discovered items.
+	titles, createTimes := b.enrichFallbackItems(ctx, items)
+
+	for idx, raw := range items {
 		if raw.AwemeID == "" {
 			continue
 		}
@@ -97,12 +106,18 @@ func (b *BatchService) tryBrowserFallback(ctx context.Context, id, userURL, secU
 		if kind == "" {
 			kind = "video"
 		}
+		title := titles[idx]
+		if title == "" {
+			title = raw.AwemeID
+		}
+		createTime := createTimes[idx]
 		item := BatchItem{
-			AwemeID: raw.AwemeID,
-			Title:   raw.AwemeID,
-			Type:    kind,
-			URL:     raw.URL,
-			Known:   known,
+			AwemeID:    raw.AwemeID,
+			Title:      title,
+			Type:       kind,
+			URL:        raw.URL,
+			CreateTime: createTime,
+			Known:      known,
 		}
 		if item.URL == "" {
 			item.URL = "https://www.douyin.com/video/" + raw.AwemeID
@@ -114,7 +129,7 @@ func (b *BatchService) tryBrowserFallback(ctx context.Context, id, userURL, secU
 				Title:        item.Title,
 				AuthorName:   nickname,
 				AuthorSecUID: secUID,
-				CreateTime:   sql.NullInt64{},
+				CreateTime:   sql.NullInt64{Int64: createTime, Valid: createTime > 0},
 				JobID:        id,
 			})
 		}
@@ -125,4 +140,42 @@ func (b *BatchService) tryBrowserFallback(ctx context.Context, id, userURL, secU
 		})
 	}
 	return nil
+}
+
+// enrichFallbackItems fills in titles and create times for scraped items via
+// the video detail API, with modest concurrency. Items that fail enrichment
+// keep empty values and fall back to the raw aweme ID.
+func (b *BatchService) enrichFallbackItems(ctx context.Context, items []browserfallback.Item) ([]string, []int64) {
+	titles := make([]string, len(items))
+	createTimes := make([]int64, len(items))
+	apiClient := core.NewDouyinAPIClient(b.deps.CookieMgr.GetCookies(), b.deps.Config.Config.Proxy)
+	defer apiClient.Close()
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 3)
+	for idx, raw := range items {
+		if raw.AwemeID == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(idx int, awemeID string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if ctx.Err() != nil {
+				return
+			}
+			detail, err := apiClient.GetVideoDetail(ctx, awemeID)
+			if err != nil || detail == nil {
+				slog.Warn("fallback item enrichment failed", "aweme_id", awemeID, "error", err)
+				return
+			}
+			if desc := strings.TrimSpace(stringValue(detail, "desc")); desc != "" {
+				titles[idx] = desc
+			}
+			createTimes[idx] = int64Value(detail["create_time"])
+		}(idx, raw.AwemeID)
+	}
+	wg.Wait()
+	return titles, createTimes
 }

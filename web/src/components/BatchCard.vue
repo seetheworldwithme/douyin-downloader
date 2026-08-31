@@ -7,6 +7,7 @@ import {
   getBatchJob,
   getCookieStatus,
   importCookies,
+  prepareBatchDownload,
   streamUrl,
 } from '../api'
 
@@ -15,6 +16,7 @@ const maxItems = ref(50)
 const incremental = ref(true)
 const mode = ref('post')
 const busy = ref(false)
+const preparingDownload = ref(false)
 const job = ref(null)
 const selectedIds = ref([])
 const cookieStatus = ref(null)
@@ -50,7 +52,6 @@ const progressText = computed(() => {
   if (job.value.status === 'interrupted') return '任务已中断，可在任务中心重新执行'
   return job.value.error || '任务失败'
 })
-
 const modeLabel = computed(() => ({ post: '发布作品', like: '点赞作品', mix: '合集作品' }[job.value?.mode || mode.value] || '发布作品'))
 
 async function refreshCookieStatus() {
@@ -119,18 +120,27 @@ function toggleAll() {
   selectedIds.value = allSelected.value ? [] : items.value.map((item) => item.aweme_id)
 }
 
-function downloadSelected() {
+async function downloadSelected() {
   if (!job.value?.job_id || selectedIds.value.length === 0) {
     ElMessage.warning('请至少选择一个作品')
     return
   }
-  const a = document.createElement('a')
-  a.href = batchStreamUrl(job.value.job_id, selectedIds.value)
-  a.download = ''
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  ElMessage.success(`正在准备 ${selectedIds.value.length} 个作品的 ZIP 流式下载`)
+  preparingDownload.value = true
+  try {
+    const prepared = await prepareBatchDownload(job.value.job_id, selectedIds.value)
+    if (!prepared?.ticket) throw new Error('服务器没有返回下载票据')
+    const a = document.createElement('a')
+    a.href = batchStreamUrl(prepared.ticket)
+    a.download = ''
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    ElMessage.success(`正在流式打包 ${prepared.count || selectedIds.value.length} 个作品`)
+  } catch (e) {
+    ElMessage.error(e.message || '批量下载准备失败')
+  } finally {
+    preparingDownload.value = false
+  }
 }
 
 async function saveCookie() {
@@ -247,6 +257,7 @@ onBeforeUnmount(stopPoll)
           <el-button
             type="primary"
             size="small"
+            :loading="preparingDownload"
             :disabled="selectedIds.length === 0 || job.status !== 'completed'"
             @click="downloadSelected"
           >

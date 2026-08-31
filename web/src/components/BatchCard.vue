@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
+  batchStreamUrl,
   createBatchJob,
   getBatchJob,
   getCookieStatus,
@@ -12,8 +13,10 @@ import {
 const raw = ref('')
 const maxItems = ref(50)
 const incremental = ref(true)
+const mode = ref('post')
 const busy = ref(false)
 const job = ref(null)
+const selectedIds = ref([])
 const cookieStatus = ref(null)
 const showCookieDialog = ref(false)
 const cookieText = ref('')
@@ -33,7 +36,10 @@ function extractUrl(text) {
 }
 
 const url = computed(() => extractUrl(raw.value.trim()))
+const isCollectionUrl = computed(() => /\/(collection|mix)\//.test(url.value))
 const running = computed(() => job.value && ['queued', 'running'].includes(job.value.status))
+const items = computed(() => job.value?.items || [])
+const allSelected = computed(() => items.value.length > 0 && selectedIds.value.length === items.value.length)
 const progressText = computed(() => {
   if (!job.value) return ''
   if (job.value.status === 'queued') return '等待执行'
@@ -41,8 +47,11 @@ const progressText = computed(() => {
   if (job.value.status === 'completed') {
     return `完成：${job.value.success || 0} 条，跳过 ${job.value.skipped || 0} 条`
   }
+  if (job.value.status === 'interrupted') return '任务已中断，可在任务中心重新执行'
   return job.value.error || '任务失败'
 })
+
+const modeLabel = computed(() => ({ post: '发布作品', like: '点赞作品', mix: '合集作品' }[job.value?.mode || mode.value] || '发布作品'))
 
 async function refreshCookieStatus() {
   try {
@@ -64,6 +73,8 @@ async function pollJob(id) {
     job.value = data
     if (['queued', 'running'].includes(data.status)) {
       pollTimer = setTimeout(() => pollJob(id), 1200)
+    } else if (data.status === 'completed') {
+      selectedIds.value = (data.items || []).map((item) => item.aweme_id)
     }
   } catch (e) {
     ElMessage.error(e.message || '读取任务失败')
@@ -72,12 +83,20 @@ async function pollJob(id) {
 
 async function startBatch() {
   if (!url.value) {
-    ElMessage.warning('请粘贴抖音用户主页链接或分享文案')
+    ElMessage.warning('请粘贴抖音作者主页或合集链接')
     return
   }
+  let actualMode = mode.value
+  if (isCollectionUrl.value) actualMode = 'mix'
+  if (!isCollectionUrl.value && actualMode === 'mix') {
+    ElMessage.warning('合集模式需要粘贴 /collection/ 或 /mix/ 合集链接')
+    return
+  }
+
   busy.value = true
+  selectedIds.value = []
   try {
-    const data = await createBatchJob(url.value, Number(maxItems.value) || 50, incremental.value)
+    const data = await createBatchJob(url.value, Number(maxItems.value) || 50, incremental.value, actualMode)
     job.value = data
     pollJob(data.job_id)
   } catch (e) {
@@ -94,6 +113,24 @@ function downloadItem(item) {
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
+}
+
+function toggleAll() {
+  selectedIds.value = allSelected.value ? [] : items.value.map((item) => item.aweme_id)
+}
+
+function downloadSelected() {
+  if (!job.value?.job_id || selectedIds.value.length === 0) {
+    ElMessage.warning('请至少选择一个作品')
+    return
+  }
+  const a = document.createElement('a')
+  a.href = batchStreamUrl(job.value.job_id, selectedIds.value)
+  a.download = ''
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  ElMessage.success(`正在准备 ${selectedIds.value.length} 个作品的 ZIP 流式下载`)
 }
 
 async function saveCookie() {
@@ -116,7 +153,7 @@ async function saveCookie() {
 }
 
 function formatTime(ts) {
-  if (!ts) return ''
+  if (!ts) return '时间未知'
   return new Date(ts * 1000).toLocaleString()
 }
 
@@ -129,16 +166,12 @@ onBeforeUnmount(stopPoll)
     <template #header>
       <div class="card-header">
         <div>
-          <div class="title">主页批量下载</div>
-          <div class="hint">扫描作者主页，SQLite 去重；增量模式只返回新作品</div>
+          <div class="title">批量下载</div>
+          <div class="hint">作者发布/点赞、合集扫描；SQLite 去重；支持选中作品流式打包 ZIP</div>
         </div>
         <el-button text @click="showCookieDialog = true">
           Cookie
-          <el-tag
-            class="cookie-tag"
-            size="small"
-            :type="cookieStatus?.valid ? 'success' : 'warning'"
-          >
+          <el-tag class="cookie-tag" size="small" :type="cookieStatus?.valid ? 'success' : 'warning'">
             {{ cookieStatus?.valid ? '可用' : '待检查' }}
           </el-tag>
         </el-button>
@@ -149,12 +182,23 @@ onBeforeUnmount(stopPoll)
       v-model="raw"
       type="textarea"
       :rows="2"
-      placeholder="粘贴抖音作者主页，例如 https://www.douyin.com/user/MS4wLjAB..."
+      placeholder="粘贴作者主页 https://www.douyin.com/user/... 或合集 https://www.douyin.com/collection/..."
       resize="vertical"
     />
 
     <div v-if="url" class="extracted">
       <span>识别到：</span><code>{{ url }}</code>
+      <el-tag v-if="isCollectionUrl" size="small" type="success">合集链接</el-tag>
+    </div>
+
+    <div class="mode-row">
+      <span class="option-label">内容类型</span>
+      <el-radio-group v-model="mode" :disabled="running || isCollectionUrl">
+        <el-radio-button value="post">发布作品</el-radio-button>
+        <el-radio-button value="like">点赞作品</el-radio-button>
+        <el-radio-button value="mix">合集链接</el-radio-button>
+      </el-radio-group>
+      <span class="muted">合集链接会自动切换为合集模式；点赞列表需账号可见且 Cookie 有权限。</span>
     </div>
 
     <div class="options">
@@ -176,11 +220,12 @@ onBeforeUnmount(stopPoll)
     <div v-if="job" class="job-box">
       <div class="job-summary">
         <div>
-          <strong>{{ job.author_nickname || '正在读取作者信息…' }}</strong>
+          <strong>{{ job.author_nickname || '正在读取信息…' }}</strong>
+          <el-tag size="small" effect="plain" class="mode-tag">{{ modeLabel }}</el-tag>
           <span class="muted job-id">{{ job.job_id }}</span>
         </div>
         <el-tag
-          :type="job.status === 'completed' ? 'success' : job.status === 'failed' ? 'danger' : 'primary'"
+          :type="job.status === 'completed' ? 'success' : ['failed', 'interrupted'].includes(job.status) ? 'danger' : 'primary'"
           effect="plain"
         >
           {{ progressText }}
@@ -188,26 +233,42 @@ onBeforeUnmount(stopPoll)
       </div>
 
       <el-alert
-        v-if="job.status === 'failed'"
-        :title="job.error || '任务失败'"
+        v-if="['failed', 'interrupted'].includes(job.status)"
+        :title="job.error || progressText"
         type="error"
         :closable="false"
         show-icon
       />
 
-      <div v-if="job.items?.length" class="items">
-        <div v-for="item in job.items" :key="item.aweme_id" class="item-row">
-          <div class="item-main">
-            <div class="item-title" :title="item.title">{{ item.title }}</div>
-            <div class="item-meta">
-              <el-tag size="small" effect="plain">{{ item.type === 'images' ? '图集' : '视频' }}</el-tag>
-              <span>{{ formatTime(item.create_time) }}</span>
-              <span v-if="item.known" class="known">此前已发现</span>
-            </div>
-          </div>
-          <el-button size="small" type="primary" plain @click="downloadItem(item)">下载</el-button>
+      <template v-if="items.length">
+        <div class="selection-bar">
+          <el-button size="small" @click="toggleAll">{{ allSelected ? '取消全选' : '全选' }}</el-button>
+          <span>已选择 {{ selectedIds.length }} / {{ items.length }}</span>
+          <el-button
+            type="primary"
+            size="small"
+            :disabled="selectedIds.length === 0 || job.status !== 'completed'"
+            @click="downloadSelected"
+          >
+            下载选中 ZIP
+          </el-button>
         </div>
-      </div>
+
+        <div class="items">
+          <div v-for="item in items" :key="item.aweme_id" class="item-row">
+            <el-checkbox v-model="selectedIds" :value="item.aweme_id" />
+            <div class="item-main">
+              <div class="item-title" :title="item.title">{{ item.title }}</div>
+              <div class="item-meta">
+                <el-tag size="small" effect="plain">{{ item.type === 'images' ? '图集' : '视频' }}</el-tag>
+                <span>{{ formatTime(item.create_time) }}</span>
+                <span v-if="item.known" class="known">此前已发现</span>
+              </div>
+            </div>
+            <el-button size="small" type="primary" plain @click="downloadItem(item)">单独下载</el-button>
+          </div>
+        </div>
+      </template>
 
       <el-empty
         v-else-if="job.status === 'completed'"
@@ -226,7 +287,6 @@ onBeforeUnmount(stopPoll)
         type="textarea"
         :rows="6"
         placeholder="ttwid=...; odin_tt=...; passport_csrf_token=..."
-        show-word-limit
       />
       <template #footer>
         <el-button @click="showCookieDialog = false">取消</el-button>
@@ -242,7 +302,10 @@ onBeforeUnmount(stopPoll)
 .options,
 .option,
 .item-row,
-.item-meta {
+.item-meta,
+.mode-row,
+.selection-bar,
+.extracted {
   display: flex;
   align-items: center;
 }
@@ -257,15 +320,23 @@ onBeforeUnmount(stopPoll)
 .muted,
 .extracted,
 .item-meta,
-.cookie-help { color: #909399; font-size: 12px; }
-.cookie-tag { margin-left: 6px; }
-.extracted { margin-top: 10px; word-break: break-all; }
+.cookie-help,
+.selection-bar { color: #909399; font-size: 12px; }
+.cookie-tag,
+.mode-tag { margin-left: 6px; }
+.extracted { margin-top: 10px; gap: 8px; word-break: break-all; }
 .extracted code,
 .cookie-help code {
   background: #f4f4f5;
   padding: 1px 5px;
   border-radius: 3px;
 }
+.mode-row {
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.option-label { font-size: 14px; }
 .options {
   margin-top: 14px;
   flex-wrap: wrap;
@@ -280,6 +351,11 @@ onBeforeUnmount(stopPoll)
 }
 .job-summary { gap: 12px; margin-bottom: 12px; }
 .job-id { margin-left: 8px; }
+.selection-bar {
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 12px 0;
+}
 .items { display: flex; flex-direction: column; gap: 8px; }
 .item-row {
   gap: 12px;
@@ -299,9 +375,12 @@ onBeforeUnmount(stopPoll)
 .known { color: #e6a23c; }
 .cookie-help { line-height: 1.6; margin-top: 0; }
 @media (max-width: 600px) {
-  .options { align-items: flex-start; flex-direction: column; }
+  .options,
+  .mode-row { align-items: flex-start; flex-direction: column; }
   .options > .el-button { width: 100%; margin-left: 0; }
   .job-summary { align-items: flex-start; flex-direction: column; }
   .job-id { display: block; margin: 4px 0 0; word-break: break-all; }
+  .selection-bar { justify-content: space-between; flex-wrap: wrap; }
+  .item-row { align-items: flex-start; }
 }
 </style>

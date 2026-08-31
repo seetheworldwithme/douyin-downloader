@@ -448,6 +448,15 @@ func (b *BatchService) run(id string) {
 			return
 		}
 		if len(resp.Items) == 0 {
+			// An empty but successful first page can also be a silent anti-bot
+			// block; try the Playwright fallback before completing with nothing.
+			if page == 0 && mode == "post" && parsed.Type == "user" {
+				if fallbackErr := b.tryBrowserFallback(ctx, id, rawURL, secUID, nickname, job.MaxItems, job.Incremental); fallbackErr == nil {
+					slog.Info("user API returned empty first page; Playwright fallback succeeded", "job_id", id)
+				} else {
+					slog.Warn("Playwright fallback unavailable for empty first page", "job_id", id, "error", fallbackErr)
+				}
+			}
 			break
 		}
 

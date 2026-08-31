@@ -64,6 +64,52 @@ auth:
 	}
 }
 
+func TestBrowserFallbackMerge(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	t.Run("absent block keeps defaults", func(t *testing.T) {
+		configPath := filepath.Join(tmpDir, "no_fallback.yml")
+		os.WriteFile(configPath, []byte("path: ./Downloads/\n"), 0644)
+		cfg, err := NewConfigLoader(configPath)
+		if err != nil {
+			t.Fatalf("failed: %v", err)
+		}
+		fb := cfg.Config.BrowserFallback
+		if fb == nil {
+			t.Fatal("expected default browser fallback config")
+		}
+		if !fb.Enabled || fb.Headless || fb.MaxScrolls != 240 {
+			t.Errorf("expected defaults, got %+v", fb)
+		}
+	})
+
+	t.Run("present block overrides", func(t *testing.T) {
+		configPath := filepath.Join(tmpDir, "fallback.yml")
+		os.WriteFile(configPath, []byte("browser_fallback:\n  enabled: false\n  headless: true\n  max_scrolls: 60\n"), 0644)
+		cfg, err := NewConfigLoader(configPath)
+		if err != nil {
+			t.Fatalf("failed: %v", err)
+		}
+		fb := cfg.Config.BrowserFallback
+		if fb == nil {
+			t.Fatal("expected browser fallback config")
+		}
+		if fb.Enabled {
+			t.Error("expected enabled=false from file")
+		}
+		if !fb.Headless {
+			t.Error("expected headless=true from file")
+		}
+		if fb.MaxScrolls != 60 {
+			t.Errorf("expected max_scrolls=60, got %d", fb.MaxScrolls)
+		}
+		// unset numeric fields keep defaults
+		if fb.IdleRounds != 8 || fb.WaitTimeoutSeconds != 480 {
+			t.Errorf("expected defaults for unset fields, got %+v", fb)
+		}
+	})
+}
+
 func TestGetLinks(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Link = []string{"https://douyin.com/user/123", "https://douyin.com/video/456"}

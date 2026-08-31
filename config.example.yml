@@ -88,7 +88,7 @@ browser_fallback:
   headless: false
   max_scrolls: 240
   idle_rounds: 8
-  wait_timeout_seconds: 600
+  wait_timeout_seconds: 480
 
 # 评论采集（可选）：启用后每个作品会额外生成 *_comments.json
 comments:

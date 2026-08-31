@@ -132,6 +132,28 @@ func (cl *ConfigLoader) mergeConfig(fileConfig *Config) {
 
 	cfg.StartTime = fileConfig.StartTime
 	cfg.EndTime = fileConfig.EndTime
+
+	// Browser fallback: merge when the file provides a browser_fallback block.
+	// The pointer distinguishes "key absent" (keep defaults) from "key present
+	// with false values" (e.g. an explicit enabled: false).
+	if fb := fileConfig.BrowserFallback; fb != nil {
+		dst := cfg.BrowserFallback
+		if dst == nil {
+			dst = &BrowserFallbackCfg{}
+			cfg.BrowserFallback = dst
+		}
+		dst.Enabled = fb.Enabled
+		dst.Headless = fb.Headless
+		if fb.MaxScrolls > 0 {
+			dst.MaxScrolls = fb.MaxScrolls
+		}
+		if fb.IdleRounds > 0 {
+			dst.IdleRounds = fb.IdleRounds
+		}
+		if fb.WaitTimeoutSeconds > 0 {
+			dst.WaitTimeoutSeconds = fb.WaitTimeoutSeconds
+		}
+	}
 }
 
 func (cl *ConfigLoader) applyEnvOverrides() {

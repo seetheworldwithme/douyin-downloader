@@ -32,7 +32,7 @@ type Config struct {
 	Progress         map[string]any     `yaml:"progress"`
 	Transcript       TranscriptConfig   `yaml:"transcript"`
 	AutoCookie       any                `yaml:"auto_cookie"`
-	BrowserFallback  BrowserFallbackCfg `yaml:"browser_fallback"`
+	BrowserFallback  *BrowserFallbackCfg `yaml:"browser_fallback"`
 	Notifications    NotificationsCfg   `yaml:"notifications"`
 	Comments         CommentsCfg        `yaml:"comments"`
 	Live             LiveCfg            `yaml:"live"`
@@ -129,9 +129,9 @@ func DefaultConfig() *Config {
 		DatabasePath:     "dy_downloader.db",
 		Progress:         map[string]any{"quiet_logs": true},
 		AutoCookie:       false,
-		BrowserFallback: BrowserFallbackCfg{
+		BrowserFallback: &BrowserFallbackCfg{
 			Enabled: true, Headless: false, MaxScrolls: 240,
-			IdleRounds: 8, WaitTimeoutSeconds: 600,
+			IdleRounds: 8, WaitTimeoutSeconds: 480,
 		},
 		Notifications: NotificationsCfg{
 			Enabled: false, OnSuccess: true, OnFailure: true,

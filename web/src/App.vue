@@ -3,9 +3,13 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { getHealth, getToken, clearToken } from './api'
 import LoginCard from './components/LoginCard.vue'
 import SubmitCard from './components/SubmitCard.vue'
+import BatchCard from './components/BatchCard.vue'
+import TaskCenter from './components/TaskCenter.vue'
+import HistoryCard from './components/HistoryCard.vue'
 
 const loggedIn = ref(!!getToken())
-const health = ref('unknown') // unknown / online / offline
+const health = ref('unknown')
+const activeTab = ref('single')
 let healthTimer = null
 
 async function checkHealth() {
@@ -23,8 +27,8 @@ function onLoggedIn() {
 function logout() {
   clearToken()
   loggedIn.value = false
+  activeTab.value = 'single'
 }
-// token 过期(api.js 在 401 时派发)→ 自动退回登录页
 function onAuthExpired() {
   loggedIn.value = false
 }
@@ -60,19 +64,29 @@ onBeforeUnmount(() => {
 
     <main class="app-main">
       <LoginCard v-if="!loggedIn" @logged-in="onLoggedIn" />
-      <SubmitCard v-else />
+      <div v-else class="workspace">
+        <el-tabs v-model="activeTab" class="workspace-tabs" stretch>
+          <el-tab-pane label="链接下载" name="single" lazy>
+            <SubmitCard />
+          </el-tab-pane>
+          <el-tab-pane label="批量下载" name="batch" lazy>
+            <BatchCard />
+          </el-tab-pane>
+          <el-tab-pane label="任务中心" name="tasks" lazy>
+            <TaskCenter />
+          </el-tab-pane>
+          <el-tab-pane label="作品库" name="history" lazy>
+            <HistoryCard />
+          </el-tab-pane>
+        </el-tabs>
+      </div>
     </main>
   </div>
 </template>
 
 <style>
-* {
-  box-sizing: border-box;
-}
-/* 触摸目标放大到安卓 Material 推荐的 ≥40dp;不影响 header 里的 text 按钮 */
-.el-button:not(.is-text):not(.is-link) {
-  min-height: 40px;
-}
+* { box-sizing: border-box; }
+.el-button:not(.is-text):not(.is-link) { min-height: 40px; }
 html,
 body {
   margin: 0;
@@ -82,13 +96,11 @@ body {
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   color: #303133;
 }
-/* dvh:移动端动态工具栏下更可靠;100vh 在 WebView 里会偏大 */
 .app {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
-/* 顶部留状态栏、左右留圆角/刘海安全区(安卓 15 edge-to-edge) */
 .app-header {
   background: #fff;
   border-bottom: 1px solid #ebeef5;
@@ -109,9 +121,7 @@ body {
   align-items: center;
   gap: 8px;
 }
-.logo {
-  font-size: 22px;
-}
+.logo { font-size: 22px; }
 .header-right {
   display: flex;
   align-items: center;
@@ -141,28 +151,39 @@ body {
 }
 .app-main {
   flex: 1;
-  max-width: 760px;
+  max-width: 980px;
   width: 100%;
   margin: 0 auto;
-  padding-top: 24px;
-  /* 底部留出手势导航条安全区 */
+  padding-top: 18px;
   padding-bottom: max(24px, env(safe-area-inset-bottom));
   padding-left: max(24px, env(safe-area-inset-left));
   padding-right: max(24px, env(safe-area-inset-right));
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
 }
+.workspace { width: 100%; }
+.workspace-tabs > .el-tabs__header {
+  margin-bottom: 18px;
+  padding: 0 8px;
+  background: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+}
+.workspace-tabs > .el-tabs__header .el-tabs__nav-wrap::after { display: none; }
+.workspace-tabs > .el-tabs__header .el-tabs__item { height: 48px; }
 @media (max-width: 600px) {
   .app-header {
     padding-left: max(12px, env(safe-area-inset-left));
     padding-right: max(12px, env(safe-area-inset-right));
   }
-  .title {
-    font-size: 15px;
+  .title { font-size: 15px; }
+  .header-right { gap: 8px; }
+  .app-main {
+    padding-top: 12px;
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
   }
-  .header-right {
-    gap: 8px;
+  .workspace-tabs > .el-tabs__header .el-tabs__item {
+    padding: 0 8px;
+    font-size: 13px;
   }
 }
 </style>

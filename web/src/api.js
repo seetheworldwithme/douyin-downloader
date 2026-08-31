@@ -1,5 +1,4 @@
 // 服务器基址:网页与后端同源部署,留空走相对 /api/v1。
-// (安卓端已拆分为原生工程 android-app/,服务器地址内置在那边)
 const SERVER_KEY = 'dd_server'
 
 export function getServerBase() {
@@ -8,14 +7,11 @@ export function getServerBase() {
   return ''
 }
 
-// 统一走 apiBase:开发时由 Vite 代理 /api -> :8000,生产时与 FastAPI 同源,
-// APK / 自托管时为绝对地址。
 function apiBase() {
   return getServerBase() + '/api/v1'
 }
 
 const TOKEN_KEY = 'dd_token'
-// token 过期时通知 App 退回登录页(自定义事件)
 const AUTH_EXPIRED_EVENT = 'dd-auth-expired'
 
 export function getToken() {
@@ -50,12 +46,10 @@ async function request(path, options = {}) {
     }
     throw new Error(detail)
   }
-  // 204 或空体
   const text = await resp.text()
   return text ? JSON.parse(text) : null
 }
 
-// 登录 -> { token }(成功后写入 localStorage,后续请求自动携带)
 export async function login(username, password) {
   const data = await request('/login', {
     method: 'POST',
@@ -65,12 +59,10 @@ export async function login(username, password) {
   return data
 }
 
-// 健康检查(公开) -> { status: 'ok' }
 export function getHealth() {
   return request('/health')
 }
 
-// 解析视频/图集链接(预览) -> { title, filename, aweme_id, type, image_count, has_music }
 export function resolveVideo(url) {
   return request('/resolve', {
     method: 'POST',
@@ -78,12 +70,63 @@ export function resolveVideo(url) {
   })
 }
 
-// 构造流式下载 URL,供浏览器原生导航下载(<a> 点击触发另存为)或 APK 原生 OkHttp 拉取。
-// 导航 GET / 原生请求无法携带 Authorization header,所以 token 走 query 参数。
-// mode:图集链接专用 —— 'images' 下载图片(多图 ZIP)/ 'video' 合成为 MP4;视频链接无需传。
-// 返回绝对地址(getServerBase 为空时退化为同源相对路径)。
 export function streamUrl(url, mode) {
   const params = { url, token: getToken() }
   if (mode) params.mode = mode
   return `${getServerBase()}/api/v1/stream?${new URLSearchParams(params).toString()}`
+}
+
+export function createBatchJob(url, maxItems = 50, incremental = true, mode = 'post') {
+  return request('/jobs', {
+    method: 'POST',
+    body: JSON.stringify({ url, mode, max_items: maxItems, incremental }),
+  })
+}
+
+export function getBatchJob(jobId) {
+  return request(`/jobs/${encodeURIComponent(jobId)}`)
+}
+
+export function listBatchJobs() {
+  return request('/jobs')
+}
+
+export function retryBatchJob(jobId) {
+  return request(`/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' })
+}
+
+// 先用 POST 发送完整选择列表，后端返回短期 ticket，避免数百个 aweme_id
+// 塞进 GET URL 导致 nginx/browser request-line 过长。
+export function prepareBatchDownload(jobId, awemeIds = []) {
+  return request('/batch/prepare', {
+    method: 'POST',
+    body: JSON.stringify({ job_id: jobId, ids: awemeIds }),
+  })
+}
+
+export function batchStreamUrl(ticket) {
+  const params = { ticket, token: getToken() }
+  return `${getServerBase()}/api/v1/batch/stream?${new URLSearchParams(params).toString()}`
+}
+
+export function getHistory({ limit = 100, offset = 0, q = '', type = '', author = '' } = {}) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  })
+  if (q) params.set('q', q)
+  if (type && type !== 'all') params.set('type', type)
+  if (author) params.set('author', author)
+  return request(`/history?${params.toString()}`)
+}
+
+export function getCookieStatus() {
+  return request('/cookies/status')
+}
+
+export function importCookies(cookie) {
+  return request('/cookies/import', {
+    method: 'POST',
+    body: JSON.stringify({ cookie }),
+  })
 }

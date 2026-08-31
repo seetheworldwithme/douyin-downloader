@@ -1,70 +1,99 @@
 # douyin-downloader
 
 ## Purpose
-A Douyin (TikTok China) video downloader. Paste a Douyin link in the web UI, get the
-no-watermark video back as a streaming download. Backend is a single Go binary
-(`server-go/`); frontend is a Vue + Vite PWA (`web/`) that builds to `server/static/`.
+A Douyin (TikTok China) downloader with a Go backend and Vue PWA. It supports single video/gallery streaming downloads plus batch scanning/downloading for author posts, author likes, and collection links. Batch media is streamed into ZIP responses without persistent server-side media storage.
 
 ## Architecture
 
 | Layer | Location | Notes |
 |-------|----------|-------|
 | Go backend | `server-go/` | module `github.com/xuziyue/douyin-downloader` |
-| Frontend | `web/` | Vue 3 + Vite + vite-plugin-pwa; builds to `../server/static` |
-| Android app | `android-app/` | Kotlin + Jetpack Compose 原生应用(独立于 web),talks to the same REST API |
+| Frontend | `web/` | Vue 3 + Vite + Element Plus + vite-plugin-pwa |
+| Android app | `android-app/` | Kotlin + Jetpack Compose native app |
 | Build output | `server/static/` | served by Go SPA fallback + nginx container |
-| Config | `config.yml`, `config.example.yml` | YAML, same schema the Python version used |
+| Config | `config.yml`, `config.example.yml` | YAML |
 | Cookies | `.cookies.json`, `config/cookies.json` | runtime secrets (gitignored) |
-| Deploy | `docker/` | edge-nginx TLS + nginx static container + host Go process |
+| Deploy | `docker/` | edge-nginx TLS + nginx static + host Go process |
 
 ### Go package layout (`server-go/internal/`)
 
 | Package | Responsibility |
 |---------|----------------|
-| `cmd/server` | Entry point: parses `-config/-host/-port` flags, wires deps, runs server |
 | `auth` | Cookie + MS-token management |
-| `config` | YAML config load/merge, env overrides (`DOUYIN_*`), cookie resolution |
+| `config` | YAML config load/merge and env overrides |
 | `control` | Rate limiter, retry handler, queue manager |
-| `core` | Douyin API client, URL parser, video resolver |
-| `server` | REST handlers, JWT-like auth, CORS, SPA static serving |
-| `storage` | SQLite (history/aweme/jobs) via `modernc.org/sqlite` (pure Go, no CGO) |
-| `utils` | Anti-bot signatures (a/bogus, xbogus), logging, cookie/filename helpers |
+| `core` | Douyin API client, URL parser, video/gallery resolver |
+| `browser` | Optional Node/Playwright bridge for user-post fallback |
+| `server` | REST handlers, auth, CORS, single streaming, batch jobs, ZIP streaming |
+| `storage` | SQLite task/media/history persistence |
+| `utils` | signatures, logging, cookie/filename helpers |
 
 ### REST API (`/api/v1/`)
 
-| Endpoint | Method | Auth | Purpose |
-|----------|--------|------|---------|
-| `/health` | GET | — | Liveness |
-| `/login` | POST | — | Username/password → token |
-| `/resolve` | POST | token | Resolve a Douyin URL → title/filename/aweme_id/type (`video`\|`images`)/image_count/has_music |
-| `/stream` | GET | token | Stream the resolved media. Videos are proxied (no on-disk save). Gallery posts take `mode=images` (single image raw / multi-image ZIP, streamed) or `mode=video` (ffmpeg slideshow with the post's music; requires ffmpeg on the server — `ffmpeg_path` config or PATH, concurrent encodes capped at 2) |
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/health` | GET | Liveness |
+| `/login` | POST | Username/password -> token |
+| `/resolve` | POST | Resolve one video/gallery |
+| `/stream` | GET | Stream one video/gallery |
+| `/jobs` | POST | Create batch scan job (`post`, `like`, `mix`) |
+| `/jobs` | GET | List active + persisted jobs |
+| `/jobs/{id}` | GET | Get job status/current in-memory results |
+| `/jobs/{id}/retry` | POST | Retry a persisted/finished job |
+| `/batch/stream` | GET | Stream selected current job items into ZIP |
+| `/history` | GET | Query SQLite media library |
+| `/cookies/status` | GET | Cookie status |
+| `/cookies/import` | POST | Import Cookie header |
 
-Non-`/api/` paths fall back to the SPA `index.html`.
+## Web workspaces
+
+`web/src/App.vue` exposes four tabs after login:
+
+1. Link download (`SubmitCard.vue`)
+2. Batch download (`BatchCard.vue`)
+3. Task center (`TaskCenter.vue`)
+4. Media library (`HistoryCard.vue`)
+
+## Batch modes
+
+- `post`: author `/user/{sec_uid}` published works
+- `like`: author `/user/{sec_uid}` liked works (visibility/Cookie dependent)
+- `mix`: direct `/collection/{mix_id}` or `/mix/{mix_id}` collection
+
+The optional browser fallback currently targets `post` first-page API failures. Like/mix mainly depend on the web API.
+
+## Storage semantics
+
+- Scanned metadata is persisted to SQLite `aweme` rows without inventing a `file_path`.
+- `HasAweme()` means "previously discovered" and drives incremental scanning.
+- `IsDownloaded()` still means an actual persisted file path exists.
+- Job mode/incremental/max-items are stored in the `job.overrides` JSON.
+- Historical queued/running rows are exposed as `interrupted` after process restart and can be retried.
 
 ## For AI Agents
 
 ### Working in this repo
-- Go ≥ 1.26 (`go.mod`: `go 1.26.4`). Pure-Go SQLite — `CGO_ENABLED=0 go build` works.
-- Build & run locally (from repo root):
-  - Backend: `cd server-go && go build -o ../.bin/server ./cmd/server && ../.bin/server -config ../config.yml`
-  - Frontend dev: `cd web && npm install && npm run dev` (Vite proxies `/api` → `127.0.0.1:8000`)
-  - Frontend prod build: `cd web && npm run build` → `server/static/`
-  - Android app: `bash build-android-app.sh` (Git Bash on Windows) → `release/apk/douyin-downloader.apk`; or open `android-app/` in Android Studio
-- Config defaults live in `server-go/internal/config/default_config.go`;
-  loader/merge in `loader.go`; cookie resolution in `GetCookies()`.
+- Go >= 1.26 (`server-go/go.mod`). Pure-Go SQLite; `CGO_ENABLED=0` builds work.
+- Backend: `cd server-go && go test ./... && go vet ./... && go build ./...`
+- Frontend: `cd web && npm ci && npm run build`
+- Dev frontend: `cd web && npm run dev`
+- Android: `bash build-android-app.sh`
+- Deploy: `bash start.sh`
 
-### Testing
-- `cd server-go && go test ./...` (unit tests per package, `*_test.go`).
-- Lint/build: `cd server-go && go vet ./... && go build ./...`.
+### Optional Playwright
 
-### Deploy
-- On the server, one command from repo root: `bash start.sh` (runs directly on the server, no SSH wrapper).
-- `start.sh` rebuilds frontend, recompiles the Go binary, restarts it, restarts nginx container.
-- Edge-nginx terminates TLS; `/` → nginx static (8083), `/api/` → Go server (8000).
+```bash
+cd tools
+npm install
+npx playwright install chromium
+```
 
-### Scope note
-The Go backend implements the **single-post web download** flow only
-(resolve + stream, for both videos and gallery/image posts). The old Python CLI
-batch modes (user posts/likes/mixes/music/live/transcription/comments) are not
-ported. Add new server endpoints under `server-go/internal/server/`
-if batch features are needed again.
+Cookie helper:
+
+```bash
+node tools/cookie-login.mjs .cookies.json
+```
+
+### CI
+
+`.github/workflows/ci.yml` runs Go tests/vet/build and Vue install/build for pull requests.

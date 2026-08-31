@@ -7,9 +7,8 @@ import (
 	"time"
 )
 
-// NewEnhanced preserves the existing single-post routes and layers the batch
-// task-center APIs on top. Keeping this separate makes the feature easy to
-// disable without touching the proven streaming handlers.
+// NewEnhanced preserves the existing single-post routes and layers the batch,
+// task-center, history and cookie-management APIs on top.
 func NewEnhanced(deps *ServerDeps, host string, port int) *Server {
 	s := &Server{deps: deps}
 	attachBatchService(s, deps)
@@ -30,6 +29,20 @@ func NewEnhanced(deps *ServerDeps, host string, port int) *Server {
 	mux.HandleFunc("/api/v1/jobs/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			s.requireUser(s.handleGetBatchJob)(w, r)
+			return
+		}
+		writeError(w, 405, "method not allowed")
+	})
+	mux.HandleFunc("/api/v1/jobs/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			s.requireUser(s.handleRetryBatchJob)(w, r)
+			return
+		}
+		writeError(w, 405, "method not allowed")
+	})
+	mux.HandleFunc("/api/v1/batch/stream", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			s.requireUser(s.handleBatchStream)(w, r)
 			return
 		}
 		writeError(w, 405, "method not allowed")
@@ -56,7 +69,6 @@ func NewEnhanced(deps *ServerDeps, host string, port int) *Server {
 		writeError(w, 405, "method not allowed")
 	})
 
-	// Existing /api/v1/health, /login, /resolve, /stream and SPA routes.
 	mux.Handle("/", base)
 
 	s.srv = &http.Server{
@@ -69,7 +81,6 @@ func NewEnhanced(deps *ServerDeps, host string, port int) *Server {
 	return s
 }
 
-// ShutdownEnhanced closes the HTTP server and the SQLite batch service.
 func (s *Server) ShutdownEnhanced(ctx context.Context) error {
 	detachBatchService(s)
 	return s.Shutdown(ctx)

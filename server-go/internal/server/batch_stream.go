@@ -2,26 +2,36 @@ package server
 
 import (
 	"archive/zip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xuziyue/douyin-downloader/internal/core"
 	"github.com/xuziyue/douyin-downloader/internal/utils"
 )
 
-func selectedBatchItems(job *BatchJob, rawIDs string) []BatchItem {
+type batchDownloadTicket struct {
+	JobID     string
+	IDs       []string
+	ExpiresAt time.Time
+}
+
+var batchDownloadTickets sync.Map
+
+func selectedBatchItems(job *BatchJob, ids []string) []BatchItem {
 	if job == nil {
 		return nil
 	}
-	if strings.TrimSpace(rawIDs) == "" {
+	if len(ids) == 0 {
 		return append([]BatchItem(nil), job.Items...)
 	}
 	wanted := map[string]bool{}
-	for _, id := range strings.Split(rawIDs, ",") {
+	for _, id := range ids {
 		id = strings.TrimSpace(id)
 		if id != "" {
 			wanted[id] = true
@@ -52,21 +62,37 @@ func zipWriteError(zw *zip.Writer, item BatchItem, err error) {
 	_ = zipWriteBytes(zw, name, []byte(fmt.Sprintf("%s\n%s\n%v\n", item.Title, item.URL, err)))
 }
 
-// handleBatchStream streams selected results as a ZIP archive. Media is fetched
-// from Douyin and written directly into the response; the server does not keep
-// persistent copies. Gallery posts are stored as image folders inside the ZIP.
-func (s *Server) handleBatchStream(w http.ResponseWriter, r *http.Request) {
+func cleanupBatchTickets() {
+	now := time.Now()
+	batchDownloadTickets.Range(func(key, value any) bool {
+		ticket, ok := value.(batchDownloadTicket)
+		if !ok || now.After(ticket.ExpiresAt) {
+			batchDownloadTickets.Delete(key)
+		}
+		return true
+	})
+}
+
+type prepareBatchDownloadRequest struct {
+	JobID string   `json:"job_id"`
+	IDs   []string `json:"ids"`
+}
+
+// handlePrepareBatchStream validates the selection using an authenticated POST
+// body and returns a short-lived ticket. This avoids putting hundreds of aweme
+// IDs into a GET query string, which can exceed browser/nginx request-line limits.
+func (s *Server) handlePrepareBatchStream(w http.ResponseWriter, r *http.Request) {
 	b := batchServiceFor(s)
 	if b == nil {
 		writeError(w, 503, "batch service unavailable")
 		return
 	}
-	jobID := strings.TrimSpace(r.URL.Query().Get("job_id"))
-	if jobID == "" {
-		writeError(w, 400, "job_id is required")
+	var req prepareBatchDownloadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, 400, "invalid request body")
 		return
 	}
-	job := b.snapshot(jobID)
+	job := b.snapshot(strings.TrimSpace(req.JobID))
 	if job == nil {
 		writeError(w, 404, "job not found")
 		return
@@ -75,7 +101,56 @@ func (s *Server) handleBatchStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 409, "该任务没有可下载的内存结果；如果服务已重启，请重新执行任务后再批量下载")
 		return
 	}
-	items := selectedBatchItems(job, r.URL.Query().Get("ids"))
+	items := selectedBatchItems(job, req.IDs)
+	if len(items) == 0 {
+		writeError(w, 400, "没有选择可下载作品")
+		return
+	}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.AwemeID)
+	}
+	cleanupBatchTickets()
+	ticketID := "dl_" + newJobID()
+	expires := time.Now().Add(10 * time.Minute)
+	batchDownloadTickets.Store(ticketID, batchDownloadTicket{JobID: job.JobID, IDs: ids, ExpiresAt: expires})
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"ticket": ticketID,
+		"count": len(ids),
+		"expires_at": expires.UTC().Format(time.RFC3339),
+	})
+}
+
+// handleBatchStream consumes a one-time ticket and streams selected results as
+// a ZIP archive. Media is fetched from Douyin and written directly into the
+// response; the server does not keep persistent copies.
+func (s *Server) handleBatchStream(w http.ResponseWriter, r *http.Request) {
+	b := batchServiceFor(s)
+	if b == nil {
+		writeError(w, 503, "batch service unavailable")
+		return
+	}
+	ticketID := strings.TrimSpace(r.URL.Query().Get("ticket"))
+	if ticketID == "" {
+		writeError(w, 400, "ticket is required")
+		return
+	}
+	value, ok := batchDownloadTickets.LoadAndDelete(ticketID)
+	if !ok {
+		writeError(w, 404, "下载票据不存在或已使用")
+		return
+	}
+	ticket, ok := value.(batchDownloadTicket)
+	if !ok || time.Now().After(ticket.ExpiresAt) {
+		writeError(w, 410, "下载票据已过期，请重新点击批量下载")
+		return
+	}
+	job := b.snapshot(ticket.JobID)
+	if job == nil || len(job.Items) == 0 {
+		writeError(w, 409, "任务结果已不可用，请重新执行任务")
+		return
+	}
+	items := selectedBatchItems(job, ticket.IDs)
 	if len(items) == 0 {
 		writeError(w, 400, "没有选择可下载作品")
 		return
@@ -84,6 +159,7 @@ func (s *Server) handleBatchStream(w http.ResponseWriter, r *http.Request) {
 	setContentDisposition(w, "douyin_batch_"+job.JobID+".zip", "douyin_batch.zip")
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Accel-Buffering", "no")
 
 	zw := zip.NewWriter(w)
 	defer zw.Close()

@@ -4,9 +4,12 @@ import { getHealth, getToken, clearToken } from './api'
 import LoginCard from './components/LoginCard.vue'
 import SubmitCard from './components/SubmitCard.vue'
 import BatchCard from './components/BatchCard.vue'
+import TaskCenter from './components/TaskCenter.vue'
+import HistoryCard from './components/HistoryCard.vue'
 
 const loggedIn = ref(!!getToken())
 const health = ref('unknown')
+const activeTab = ref('single')
 let healthTimer = null
 
 async function checkHealth() {
@@ -24,6 +27,7 @@ function onLoggedIn() {
 function logout() {
   clearToken()
   loggedIn.value = false
+  activeTab.value = 'single'
 }
 function onAuthExpired() {
   loggedIn.value = false
@@ -60,10 +64,22 @@ onBeforeUnmount(() => {
 
     <main class="app-main">
       <LoginCard v-if="!loggedIn" @logged-in="onLoggedIn" />
-      <template v-else>
-        <SubmitCard />
-        <BatchCard />
-      </template>
+      <div v-else class="workspace">
+        <el-tabs v-model="activeTab" class="workspace-tabs" stretch>
+          <el-tab-pane label="链接下载" name="single" lazy>
+            <SubmitCard />
+          </el-tab-pane>
+          <el-tab-pane label="批量下载" name="batch" lazy>
+            <BatchCard />
+          </el-tab-pane>
+          <el-tab-pane label="任务中心" name="tasks" lazy>
+            <TaskCenter />
+          </el-tab-pane>
+          <el-tab-pane label="作品库" name="history" lazy>
+            <HistoryCard />
+          </el-tab-pane>
+        </el-tabs>
+      </div>
     </main>
   </div>
 </template>
@@ -135,17 +151,24 @@ body {
 }
 .app-main {
   flex: 1;
-  max-width: 900px;
+  max-width: 980px;
   width: 100%;
   margin: 0 auto;
-  padding-top: 24px;
+  padding-top: 18px;
   padding-bottom: max(24px, env(safe-area-inset-bottom));
   padding-left: max(24px, env(safe-area-inset-left));
   padding-right: max(24px, env(safe-area-inset-right));
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
 }
+.workspace { width: 100%; }
+.workspace-tabs > .el-tabs__header {
+  margin-bottom: 18px;
+  padding: 0 8px;
+  background: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+}
+.workspace-tabs > .el-tabs__header .el-tabs__nav-wrap::after { display: none; }
+.workspace-tabs > .el-tabs__header .el-tabs__item { height: 48px; }
 @media (max-width: 600px) {
   .app-header {
     padding-left: max(12px, env(safe-area-inset-left));
@@ -153,5 +176,14 @@ body {
   }
   .title { font-size: 15px; }
   .header-right { gap: 8px; }
+  .app-main {
+    padding-top: 12px;
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+  .workspace-tabs > .el-tabs__header .el-tabs__item {
+    padding: 0 8px;
+    font-size: 13px;
+  }
 }
 </style>

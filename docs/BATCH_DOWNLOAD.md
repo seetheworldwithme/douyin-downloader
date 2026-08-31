@@ -11,50 +11,57 @@
 3. **任务中心**：查看运行中和历史任务，失败/中断任务可重新执行。
 4. **作品库**：查询 SQLite 中已发现作品，按关键词、作者和类型筛选并重新下载。
 
-## 批量下载
+## 批量模式
 
 ### 作者发布
 
-粘贴：
-
-```text
-https://www.douyin.com/user/<sec_uid>
-```
-
-内容类型选择「发布作品」。
+粘贴 `https://www.douyin.com/user/<sec_uid>`，选择 `post`。
 
 ### 作者点赞
 
-使用相同作者主页链接，内容类型选择「点赞作品」。点赞列表是否可访问取决于目标账号可见性以及当前 Cookie 权限。
+使用相同作者主页链接，选择 `like`。点赞列表是否可访问取决于账号可见性以及当前 Cookie 权限。
 
 ### 合集
 
-粘贴：
+支持：
 
 ```text
 https://www.douyin.com/collection/<mix_id>
 https://www.douyin.com/mix/<mix_id>
 ```
 
-页面会自动使用合集模式。
+页面自动使用 `mix` 模式。
 
-### 真正批量下载
+## 真正批量下载
 
-扫描完成后作品默认全部选中，也可以取消或重新选择。点击「下载选中 ZIP」后：
+扫描完成后作品默认全部选中，也可以取消或重新选择。
+
+为了支持一次选择数百个作品，前端不会把全部 `aweme_id` 塞进 GET URL，而是使用两步流程：
 
 ```text
-浏览器
-  ↓ GET /api/v1/batch/stream
-Go 服务
-  ↓ 逐个解析作品
-Douyin CDN
-  ↓ 边下载边写 ZIP
-浏览器下载
+POST /api/v1/batch/prepare
+  body: job_id + ids[]
+        ↓
+返回 10 分钟有效的一次性 ticket
+        ↓
+GET /api/v1/batch/stream?ticket=...
+        ↓
+Go 服务逐个从 Douyin 拉取媒体
+        ↓
+边拉取边写 ZIP 响应
 ```
 
-视频直接写入 ZIP；图集以子目录形式写入原图。整个过程不会把媒体长期保存到服务器磁盘。单项失败时 ZIP 内会增加 `errors/<aweme_id>.txt`，其他作品继续处理。
+这样不会撞浏览器/Nginx 请求行长度限制，也不会让浏览器先把整个 ZIP 缓存在内存中。
 
-## 新增 API
+ZIP 内容：
+
+- 视频：直接写入 `.mp4`
+- 图集：以作品子目录写入原图
+- 单项失败：写入 `errors/<aweme_id>.txt`，其余作品继续
+
+响应设置 `X-Accel-Buffering: no`，减少反向代理对大 ZIP 的缓冲。媒体不会长期保存到服务器磁盘。
+
+## API
 
 均位于 `/api/v1`，沿用现有 token 鉴权。
 
@@ -63,13 +70,14 @@ Douyin CDN
 | POST | `/jobs` | 创建批量扫描任务 |
 | GET | `/jobs` | 查看运行中 + SQLite 历史任务 |
 | GET | `/jobs/{id}` | 查看任务状态与当前进程中的作品结果 |
-| POST | `/jobs/{id}/retry` | 使用原 URL / mode / maxItems / incremental 重新执行 |
-| GET | `/batch/stream?job_id=...&ids=...` | 把选中作品流式打包 ZIP |
-| GET | `/history` | 查询作品库，支持筛选 |
-| GET | `/cookies/status` | 查看 Cookie 状态 |
-| POST | `/cookies/import` | 导入浏览器 Cookie 请求头 |
+| POST | `/jobs/{id}/retry` | 使用原参数重新执行 |
+| POST | `/batch/prepare` | 验证选中作品并创建短期下载 ticket |
+| GET | `/batch/stream?ticket=...` | 消费一次性 ticket，流式返回 ZIP |
+| GET | `/history` | 查询作品库 |
+| GET | `/cookies/status` | Cookie 状态 |
+| POST | `/cookies/import` | 导入 Cookie |
 
-创建作者发布任务：
+创建任务：
 
 ```json
 {
@@ -80,49 +88,23 @@ Douyin CDN
 }
 ```
 
-作者点赞：
+任务状态：`queued -> running -> completed / failed`。
 
-```json
-{
-  "url": "https://www.douyin.com/user/MS4wLjAB...",
-  "mode": "like",
-  "max_items": 50,
-  "incremental": true
-}
-```
-
-合集：
-
-```json
-{
-  "url": "https://www.douyin.com/collection/1234567890",
-  "mode": "mix",
-  "max_items": 100,
-  "incremental": true
-}
-```
-
-任务状态：
-
-```text
-queued -> running -> completed / failed
-```
-
-如果服务在任务运行时重启，SQLite 中原来的 `queued/running` 记录会在任务中心显示为 `interrupted`，可直接重新执行。
+如果服务在任务运行时重启，SQLite 中原来的 `queued/running` 记录会在任务中心显示为 `interrupted`，可重新执行。
 
 ## SQLite 去重与任务持久化
 
-扫描到的作品元数据写入现有 `aweme` 表，但不会伪造 `file_path`：
+扫描作品写入 `aweme` 表，但不会伪造 `file_path`：
 
-- `HasAweme()`：判断作品是否已经发现过；
-- `IsDownloaded()`：仍只把存在真实 `file_path` 的记录视为已下载；
-- 发布作品增量模式使用 `author_sec_uid + create_time` 快速停止，同时用 `aweme_id` 精确去重；
-- 点赞/合集增量主要使用 `aweme_id` 去重，因为作品作者和时间线并不等同于被扫描账号；
-- `job` 表持久化 `mode / incremental / max_items`，服务重启后任务中心仍可展示并重新执行。
+- `HasAweme()` 表示以前是否发现过；
+- `IsDownloaded()` 仍只表示存在真实下载路径；
+- `post` 增量使用 `author_sec_uid + create_time` 快速停止，同时用 `aweme_id` 精确去重；
+- `like/mix` 主要按 `aweme_id` 去重；
+- `job.overrides` 保存 `mode / incremental / max_items`。
 
-## 作品库筛选
+## 作品库
 
-`GET /api/v1/history` 支持：
+`GET /history` 支持：
 
 ```text
 q       标题 / 作者 / aweme_id 模糊搜索
@@ -132,19 +114,11 @@ limit   1-500
 offset  偏移量
 ```
 
-Web「作品库」提供对应搜索框、作者筛选、类型筛选和重新下载按钮。
+## 重试与浏览器兜底
 
-## API 重试与浏览器兜底
+正常 API 继续使用 1s / 2s / 5s 指数退避。发布作品首屏 API 连续失败时，可选 Playwright 兜底；点赞和合集目前主要依赖 Web API。
 
-正常链路继续复用 `core.DouyinAPIClient.RequestJSON()` 的指数退避：
-
-```text
-1s -> 2s -> 5s
-```
-
-发布作品主页 API 在首屏连续失败时，可选尝试 Playwright 浏览器兜底。点赞和合集目前主要依赖 Web API，这与参考项目当前的能力边界一致。
-
-安装可选浏览器依赖：
+安装：
 
 ```bash
 cd tools
@@ -162,43 +136,29 @@ browser_fallback:
 
 ## Cookie
 
-### Web 导入
-
-在「批量下载」页面右上角点击 Cookie，粘贴已登录浏览器请求里的完整 Cookie 请求头。后端解析后写入 `.cookies.json`，原始 Cookie 字符串不会返回给前端。
-
-### 浏览器辅助登录
+Web 可直接导入 Cookie。也可以：
 
 ```bash
-cd tools
-npm install
-npx playwright install chromium
-cd ..
 node tools/cookie-login.mjs .cookies.json
 ```
 
-登录完成后脚本自动提取 Cookie 并保存。不要把 `.cookies.json` 提交到 Git。
+不要把 `.cookies.json` 提交到 Git。
 
 ## CI
 
-本分支新增 `.github/workflows/ci.yml`。每个 PR 自动执行：
+`.github/workflows/ci.yml` 在 PR 自动执行：
 
 ```text
-Go backend:
-  go test ./...
-  go vet ./...
-  go build ./...
-
-Vue frontend:
-  npm ci
-  npm run build
+Go:   go test ./... + go vet ./... + go build ./...
+Vue:  npm ci + npm run build
 ```
 
 ## 部署
 
-仍使用原来的：
+仍使用：
 
 ```bash
 bash start.sh
 ```
 
-原 `/health`、`/login`、`/resolve`、`/stream` 行为保持不变，新功能作为增强层挂载。
+原 `/health`、`/login`、`/resolve`、`/stream` 保持兼容。

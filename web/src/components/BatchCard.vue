@@ -254,9 +254,9 @@ onBeforeUnmount(stopPoll)
           </el-button>
         </div>
 
-        <div class="items">
+        <el-checkbox-group v-model="selectedIds" class="items">
           <div v-for="item in items" :key="item.aweme_id" class="item-row">
-            <el-checkbox v-model="selectedIds" :value="item.aweme_id" />
+            <el-checkbox :value="item.aweme_id" />
             <div class="item-main">
               <div class="item-title" :title="item.title">{{ item.title }}</div>
               <div class="item-meta">
@@ -267,7 +267,7 @@ onBeforeUnmount(stopPoll)
             </div>
             <el-button size="small" type="primary" plain @click="downloadItem(item)">单独下载</el-button>
           </div>
-        </div>
+        </el-checkbox-group>
       </template>
 
       <el-empty

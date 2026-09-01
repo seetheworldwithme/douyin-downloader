@@ -65,8 +65,6 @@ func ParseURL(rawURL string) *ParsedURL {
 		if m := reMixID.FindStringSubmatch(rawURL); len(m) > 1 {
 			result.MixID = m[1]
 		}
-	case "music":
-		// ponytail: ID 不再解析 —— 服务器只支持视频/图集,music 链接仅分类后拒绝
 	case "gallery":
 		if m := reNoteID.FindStringSubmatch(rawURL); len(m) > 1 {
 			result.NoteID = m[1]

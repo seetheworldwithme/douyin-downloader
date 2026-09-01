@@ -24,8 +24,6 @@ import (
 	"github.com/xuziyue/douyin-downloader/internal/core"
 )
 
-const tokenTTL = 7 * 24 * time.Hour
-
 var defaultCORS = []string{
 	"http://localhost:5173",
 	"http://127.0.0.1:5173",
@@ -127,10 +125,11 @@ func b64decode(s string) ([]byte, error) {
 func issueToken(username, secret string) (string, error) {
 	header, _ := json.Marshal(map[string]string{"alg": "HS256", "typ": "JWT"})
 	now := time.Now().Unix()
+	// 不再签发 exp:token 永不过期(verifyToken 对无 exp 的 token 直接放行),
+	// 设备登录一次即长期在线;失效手段是重启换 secret(auth.secret 未配置时每次重启随机)。
 	payload, _ := json.Marshal(map[string]int64{
 		"sub": 0, // we store username separately
 		"iat": now,
-		"exp": now + int64(tokenTTL.Seconds()),
 	})
 
 	// Store username in payload
@@ -177,8 +176,8 @@ func verifyToken(tokenStr, secret string) (map[string]any, bool) {
 		return nil, false
 	}
 
-	exp, ok := payload["exp"].(float64)
-	if !ok || int64(exp) < time.Now().Unix() {
+	// exp 可选:无 exp = 永不过期;带 exp 的旧 token 仍按到期时间校验
+	if exp, ok := payload["exp"].(float64); ok && int64(exp) < time.Now().Unix() {
 		return nil, false
 	}
 

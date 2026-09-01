@@ -14,7 +14,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -54,6 +56,11 @@ fun LoginScreen(vm: AppViewModel) {
                 colors = darkTextFieldColors(),
                 visualTransformation =
                     if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                // 安全键盘:关闭联想/自动更正,并让系统按密码输入法处理
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    autoCorrect = false,
+                ),
                 trailingIcon = {
                     Text(
                         if (showPassword) "隐藏" else "显示",

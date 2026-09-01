@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 一键启动抖音下载器(在服务器上直接执行:`bash start.sh`):
-#   1) npm run build 打包前端 → server/static
+#   1) npm run build 打包前端 → server-go/static
 #   2) 编译 Go 后端(server-go)并在宿主机后台启动,监听 127.0.0.1:8000
 #   3) docker compose 启动官方 nginx 镜像(127.0.0.1:8083,纯静态托管前端)
 # 对外 HTTPS 由 edge-nginx 负责(见 docker/edge-proxy/douyin.xuziyue.work.conf)。
@@ -38,7 +38,7 @@ else
 fi
 npm run build
 cd "$REPO_DIR"
-echo "  前端产物: $REPO_DIR/server/static"
+echo "  前端产物: $REPO_DIR/server-go/static"
 
 echo "== [2/3] 编译并启动 Go 后端 (127.0.0.1:$SERVE_PORT) =="
 if [[ -f .backend.pid ]] && kill -0 "$(cat .backend.pid)" 2>/dev/null; then

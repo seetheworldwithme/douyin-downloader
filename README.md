@@ -17,10 +17,10 @@ The frontend is an installable PWA; a native Android app (Kotlin + Jetpack Compo
 
 | Layer | Tech | Location |
 |-------|------|----------|
-| Backend | Go (`net/http`, pure-Go SQLite `modernc.org/sqlite`, no CGO) | `server-go/` |
+| Backend | Go (`net/http`, no CGO) | `server-go/` |
 | Frontend | Vue 3 + Vite + vite-plugin-pwa | `web/` |
 | Android | Kotlin + Jetpack Compose (native) | `android-app/` |
-| Build output | static files, served by the Go SPA fallback and the nginx container | `server/static/` |
+| Build output | static files, served by the Go SPA fallback and the nginx container | `server-go/static/` |
 | Config | YAML (`config.yml`) | repo root |
 | Deploy | edge-nginx (TLS) + nginx static container + host Go process | `docker/` |
 
@@ -45,7 +45,7 @@ npm run dev                                    # http://localhost:5173
 
 ### Production build
 ```bash
-cd web && npm install && npm run build          # outputs to ../server/static
+cd web && npm install && npm run build          # outputs to ../server-go/static
 cd ../server-go && go build -o ../.bin/server ./cmd/server
 ./.bin/server -config config.yml
 ```
@@ -82,16 +82,16 @@ On the server (where the repo is cloned), from the repo root:
 bash start.sh
 ```
 
-`start.sh` runs **on the server directly** (no SSH wrapper). It will: ① build the frontend → `server/static`; ② compile and start the Go backend in the background (`127.0.0.1:8000`); ③ start the nginx static container (`127.0.0.1:8083`). Public HTTPS is terminated by edge-nginx: `/` → nginx, `/api/` → Go backend. Edge-nginx is a separate repo and is not managed by this script.
+`start.sh` runs **on the server directly** (no SSH wrapper). It will: ① build the frontend → `server-go/static`; ② compile and start the Go backend in the background (`127.0.0.1:8000`); ③ start the nginx static container (`127.0.0.1:8083`). Public HTTPS is terminated by edge-nginx: `/` → nginx, `/api/` → Go backend. Edge-nginx is a separate repo and is not managed by this script.
 
 See [`docker/README.md`](docker/README.md) for details.
 
 ## Project layout
 
 ```
-server-go/          Go backend (cmd/server + internal/{auth,config,control,core,server,storage,utils})
-web/                Vue frontend (builds to server/static)
-server/static/      frontend build output (Go SPA fallback + nginx)
+server-go/          Go backend (cmd/server + internal/{auth,config,core,server,utils})
+web/                Vue frontend (builds to server-go/static)
+server-go/static/      frontend build output (Go SPA fallback + nginx)
 start.sh            one-command server bring-up (frontend build + Go backend + nginx container)
 docker/             nginx / edge-proxy config (no deploy scripts — use root start.sh)
 config.yml          runtime config (gitignored)

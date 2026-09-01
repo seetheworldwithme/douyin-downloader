@@ -21,7 +21,7 @@
 | 文件 | 作用 |
 |------|------|
 | `start.sh`(仓库根) | **服务器端一键**:构建前端 + 编译起 Go 后端 + 起前端容器 |
-| `docker-compose.yml` | 前端官方 nginx 镜像,`127.0.0.1:8083:80`,挂载 `server/static` + `nginx.conf` |
+| `docker-compose.yml` | 前端官方 nginx 镜像,`127.0.0.1:8083:80`,挂载 `server-go/static` + `nginx.conf` |
 | `nginx.conf` | 前端容器纯静态 server block(SPA + 缓存,不处理 /api) |
 | `edge-proxy/douyin.xuziyue.work.conf` | **edge-nginx 的 server block**:443 + 证书 + `/`→8083 + `/api/`→8000 |
 
@@ -43,7 +43,7 @@ git pull          # 拉最新代码(可选)
 bash start.sh
 ```
 
-`start.sh` 会:① `npm run build` 构建前端 → `server/static`;② 编译并后台启动 Go 后端
+`start.sh` 会:① `npm run build` 构建前端 → `server-go/static`;② 编译并后台启动 Go 后端
 (`127.0.0.1:8000`);③ `docker compose up -d` 启动前端 nginx 容器(`127.0.0.1:8083`)。
 完成后访问 `https://douyin.xuziyue.work/`。
 

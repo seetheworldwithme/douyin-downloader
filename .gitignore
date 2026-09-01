@@ -37,7 +37,7 @@ config/cookies.json
 # Frontend (web/) build artifacts and deps
 web/node_modules/
 web/dist/
-server/static/
+server-go/static/
 
 # Android APK build output (build-android-app.sh 产物)
 release/

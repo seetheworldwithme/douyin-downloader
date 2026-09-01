@@ -655,9 +655,8 @@ func (s *Server) routes() http.Handler {
 		}
 	})
 
-	// Static file serving (SPA)
-	staticDir := filepath.Join(filepath.Dir(s.deps.Config.ConfigDir()), "server", "static")
-	// For now, serve from server-go/server/static if available
+	// Static file serving (SPA) — 前端构建产物(web/: npm run build → server-go/static)
+	staticDir := filepath.Join(filepath.Dir(s.deps.Config.ConfigDir()), "server-go", "static")
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			writeError(w, 404, "not found")

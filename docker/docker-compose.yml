@@ -14,7 +14,7 @@ services:
       - "127.0.0.1:8083:80"
     volumes:
       # 前端构建产物(start.sh 先 npm run build 生成)
-      - ../server/static:/usr/share/nginx/html:ro
+      - ../server-go/static:/usr/share/nginx/html:ro
       # 站点配置覆盖官方 default.conf(纯静态托管)
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped

@@ -3,16 +3,16 @@
 ## 定位
 抖音视频下载器。在 Web 界面粘贴抖音分享链接,即可无水印流式下载视频或图集。
 后端是单个 Go 二进制(`server-go/`);前端是 Vue + Vite PWA(`web/`),构建产物
-输出到 `server/static/`。
+输出到 `server-go/static/`。
 
 ## 架构
 
 | 层 | 位置 | 说明 |
 |----|------|------|
 | Go 后端 | `server-go/` | module `github.com/xuziyue/douyin-downloader` |
-| 前端 | `web/` | Vue 3 + Vite + vite-plugin-pwa;构建产物 → `../server/static` |
+| 前端 | `web/` | Vue 3 + Vite + vite-plugin-pwa;构建产物 → `../server-go/static` |
 | 安卓端 | `android-app/` | Kotlin + Jetpack Compose 原生应用(独立于 web),调用同一套 REST API |
-| 构建产物 | `server/static/` | 由 Go 服务 SPA 回退和 nginx 容器共同托管 |
+| 构建产物 | `server-go/static/` | 由 Go 服务 SPA 回退和 nginx 容器共同托管 |
 | 配置 | `config.yml`、`config.example.yml` | YAML 配置 |
 | Cookies | `.cookies.json`、`config/cookies.json` | 运行时敏感数据(gitignore) |
 | 部署 | `docker/` | edge-nginx TLS + nginx 静态容器 + 宿主机 Go 进程 |
@@ -47,7 +47,7 @@
 - 本地构建与运行(仓库根目录):
   - 后端:`cd server-go && go build -o ../.bin/server ./cmd/server && ../.bin/server -config ../config.yml`
   - 前端开发:`cd web && npm install && npm run dev`(Vite 代理 `/api` → `127.0.0.1:8000`)
-  - 前端生产构建:`cd web && npm run build` → `server/static/`(PWA service-worker 压缩需 Node 20+;`start.sh` 会 source nvm 处理)
+  - 前端生产构建:`cd web && npm run build` → `server-go/static/`(PWA service-worker 压缩需 Node 20+;`start.sh` 会 source nvm 处理)
   - 安卓:`bash build-android-app.sh`(Windows Git Bash)→ `release/apk/douyin-downloader.apk`,debug 包可直接安装;release 需 `BUILD_VARIANT=release`(自配签名)。也可用 Android Studio 打开 `android-app/`。详见 `docs/APK.md`
 - 配置默认值在 `server-go/internal/config/default_config.go`;加载/合并在
   `loader.go`;cookie 解析在 `GetCookies()`。

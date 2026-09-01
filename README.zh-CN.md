@@ -17,10 +17,10 @@
 
 | 层 | 技术 | 位置 |
 |----|------|------|
-| 后端 | Go（`net/http`，纯 Go SQLite `modernc.org/sqlite`，无需 CGO） | `server-go/` |
+| 后端 | Go（`net/http`，无需 CGO） | `server-go/` |
 | 前端 | Vue 3 + Vite + vite-plugin-pwa | `web/` |
 | 安卓 | Kotlin + Jetpack Compose（原生） | `android-app/` |
-| 前端构建产物 | 静态文件，由 Go 服务 SPA 兜底托管，也由 nginx 容器托管 | `server/static/` |
+| 前端构建产物 | 静态文件，由 Go 服务 SPA 兜底托管，也由 nginx 容器托管 | `server-go/static/` |
 | 配置 | YAML（`config.yml`） | 仓库根 |
 | 部署 | edge-nginx（TLS 终结）+ nginx 静态容器 + 宿主机 Go 进程 | `docker/` |
 
@@ -45,7 +45,7 @@ npm run dev                                    # http://localhost:5173
 
 ### 生产构建
 ```bash
-cd web && npm install && npm run build          # 产物输出到 ../server/static
+cd web && npm install && npm run build          # 产物输出到 ../server-go/static
 cd ../server-go && go build -o ../.bin/server ./cmd/server
 ./.bin/server -config config.yml
 ```
@@ -82,16 +82,16 @@ cd ../server-go && go build -o ../.bin/server ./cmd/server
 bash start.sh
 ```
 
-`start.sh` **直接在服务器上运行**（无 SSH 包装），会：① 构建前端 → `server/static`；② 编译并后台启动 Go 后端（`127.0.0.1:8000`）；③ 启动 nginx 静态容器（`127.0.0.1:8083`）。对外 HTTPS 由 edge-nginx 终结：`/` → nginx，`/api/` → Go 后端。edge-nginx 是独立仓库，本脚本不管理。
+`start.sh` **直接在服务器上运行**（无 SSH 包装），会：① 构建前端 → `server-go/static`；② 编译并后台启动 Go 后端（`127.0.0.1:8000`）；③ 启动 nginx 静态容器（`127.0.0.1:8083`）。对外 HTTPS 由 edge-nginx 终结：`/` → nginx，`/api/` → Go 后端。edge-nginx 是独立仓库，本脚本不管理。
 
 详见 [`docker/README.md`](docker/README.md)。
 
 ## 项目结构
 
 ```
-server-go/          Go 后端（cmd/server + internal/{auth,config,control,core,server,storage,utils}）
-web/                Vue 前端（构建到 server/static）
-server/static/      前端构建产物（Go SPA 兜底 + nginx 托管）
+server-go/          Go 后端（cmd/server + internal/{auth,config,core,server,utils}）
+web/                Vue 前端（构建到 server-go/static）
+server-go/static/      前端构建产物（Go SPA 兜底 + nginx 托管）
 start.sh            服务器一键启动（构建前端 + Go 后端 + nginx 容器）
 docker/             nginx / edge-proxy 配置（无部署脚本，用根 start.sh）
 config.yml          运行配置（gitignored）

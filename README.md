@@ -101,4 +101,4 @@ config.example.yml  config template
 
 ## Note
 
-The Go backend currently implements only the single-video resolve + streaming-download web flow. The earlier Python CLI's batch-download modes (user posts / likes / mixes / music / live recording / comments / transcription) were not ported. To restore them, add new endpoints under `server-go/internal/server/`.
+The backend currently implements only the single-post resolve + streaming-download web flow (videos and gallery posts). Batch-download modes (user posts / likes / mixes / music / live recording / comments / transcription) are not implemented. To add them, create new endpoints under `server-go/internal/server/`.

@@ -35,15 +35,6 @@ func isLiveReplayPath(host, path string) bool {
 	return host == "webcast.amemv.com" && strings.HasPrefix(path, "/douyin/webcast/reflow/episode/")
 }
 
-// ValidateURL checks if a URL string has both scheme and host.
-func ValidateURL(rawURL string) bool {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return false
-	}
-	return u.Scheme != "" && u.Host != ""
-}
-
 // SanitizeFilename removes illegal characters and normalizes the filename.
 func SanitizeFilename(filename string, maxLength int) string {
 	filename = strings.ReplaceAll(filename, "\n", " ")

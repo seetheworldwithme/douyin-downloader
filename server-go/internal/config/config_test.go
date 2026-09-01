@@ -64,33 +64,6 @@ auth:
 	}
 }
 
-func TestGetLinks(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.Link = []string{"https://douyin.com/user/123", "https://douyin.com/video/456"}
-	cl := &ConfigLoader{Config: cfg}
-
-	links := cl.GetLinks()
-	if len(links) != 2 {
-		t.Fatalf("expected 2 links, got %d", len(links))
-	}
-}
-
-func TestValidate(t *testing.T) {
-	cfg := DefaultConfig()
-	cl := &ConfigLoader{Config: cfg}
-
-	// No links = invalid
-	if cl.Validate() {
-		t.Error("expected invalid (no links)")
-	}
-
-	// With links and path = valid
-	cl.Config.Link = []string{"https://douyin.com/user/test"}
-	if !cl.Validate() {
-		t.Error("expected valid")
-	}
-}
-
 func TestEnvOverrides(t *testing.T) {
 	os.Setenv("DOUYIN_THREAD", "20")
 	os.Setenv("DOUYIN_PROXY", "http://proxy:8080")

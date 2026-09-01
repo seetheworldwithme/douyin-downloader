@@ -4,26 +4,6 @@ import (
 	"testing"
 )
 
-func TestValidateURL(t *testing.T) {
-	tests := []struct {
-		url      string
-		expected bool
-	}{
-		{"https://www.douyin.com/video/123", true},
-		{"http://example.com", true},
-		{"not-a-url", false},
-		{"", false},
-		{"https://", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.url, func(t *testing.T) {
-			if got := ValidateURL(tt.url); got != tt.expected {
-				t.Errorf("ValidateURL(%q) = %v, want %v", tt.url, got, tt.expected)
-			}
-		})
-	}
-}
-
 func TestSanitizeFilename(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -222,37 +202,6 @@ func TestGenerateFingerprint(t *testing.T) {
 	// Should contain Win32 platform
 	if !contains(fp, "Win32") {
 		t.Error("Chrome fingerprint should have Win32 platform")
-	}
-}
-
-func TestParseTimestamp(t *testing.T) {
-	ts := ParseTimestamp(1700000000)
-	if ts == "" {
-		t.Error("timestamp should not be empty")
-	}
-	// Should be a date format YYYY-MM-DD
-	if len(ts) != 10 {
-		t.Errorf("expected 10-char date, got %q", ts)
-	}
-}
-
-func TestFormatSize(t *testing.T) {
-	tests := []struct {
-		bytes    int64
-		expected string
-	}{
-		{500, "500 B"},
-		{1024, "1.00 KB"},
-		{1048576, "1.00 MB"},
-		{1073741824, "1.00 GB"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.expected, func(t *testing.T) {
-			got := FormatSize(tt.bytes)
-			if got != tt.expected {
-				t.Errorf("FormatSize(%d) = %q, want %q", tt.bytes, got, tt.expected)
-			}
-		})
 	}
 }
 

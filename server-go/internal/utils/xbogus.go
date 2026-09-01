@@ -47,11 +47,6 @@ func NewXBogus(userAgent string) *XBogus {
 	return &XBogus{userAgent: userAgent}
 }
 
-// UserAgent returns the configured User-Agent.
-func (x *XBogus) UserAgent() string {
-	return x.userAgent
-}
-
 // md5HexStrToArray converts an MD5 hex string to a byte array.
 // If the string is longer than 32 chars, it returns the raw byte values.
 func md5HexStrToArray(md5Str string) []int {
@@ -225,9 +220,4 @@ func (x *XBogus) Build(rawURL string) (string, string, string) {
 
 	signedURL := fmt.Sprintf("%s&X-Bogus=%s", rawURL, xb)
 	return signedURL, xb, x.userAgent
-}
-
-// GenerateXBogus is a convenience function.
-func GenerateXBogus(rawURL, userAgent string) (string, string, string) {
-	return NewXBogus(userAgent).Build(rawURL)
 }

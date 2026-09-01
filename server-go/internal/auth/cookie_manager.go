@@ -40,27 +40,6 @@ func (cm *CookieManager) GetCookies() map[string]string {
 	return cm.cookies
 }
 
-// GetCookieString returns cookies as "key=value; key2=value2".
-func (cm *CookieManager) GetCookieString() string {
-	cookies := cm.GetCookies()
-	parts := make([]string, 0, len(cookies))
-	for k, v := range cookies {
-		parts = append(parts, k+"="+v)
-	}
-	return joinStrings(parts, "; ")
-}
-
-func joinStrings(parts []string, sep string) string {
-	result := ""
-	for i, p := range parts {
-		if i > 0 {
-			result += sep
-		}
-		result += p
-	}
-	return result
-}
-
 func (cm *CookieManager) save() {
 	dir := filepath.Dir(cm.cookieFile)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -88,26 +67,4 @@ func (cm *CookieManager) load() {
 		return
 	}
 	cm.cookies = utils.SanitizeCookies(raw)
-}
-
-// ValidateCookies checks for required Douyin cookie keys.
-func (cm *CookieManager) ValidateCookies() bool {
-	required := []string{"ttwid", "odin_tt", "passport_csrf_token"}
-	cookies := cm.GetCookies()
-	for _, key := range required {
-		if v, ok := cookies[key]; !ok || v == "" {
-			slog.Warn("Cookie validation failed, missing key", "key", key)
-			return false
-		}
-	}
-	if _, ok := cookies["msToken"]; !ok {
-		slog.Info("msToken not found, will be generated automatically if needed")
-	}
-	return true
-}
-
-// ClearCookies removes all cookies and deletes the cookie file.
-func (cm *CookieManager) ClearCookies() {
-	cm.cookies = map[string]string{}
-	os.Remove(cm.cookieFile)
 }

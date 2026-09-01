@@ -154,46 +154,6 @@ func (cl *ConfigLoader) applyEnvOverrides() {
 	}
 }
 
-// Get returns a value from the config for a given key.
-func (cl *ConfigLoader) Get(key string) any {
-	switch key {
-	case "path":
-		return cl.Config.Path
-	case "thread":
-		return cl.Config.Thread
-	case "proxy":
-		return cl.Config.Proxy
-	case "rate_limit":
-		return cl.Config.RateLimit
-	case "retry_times":
-		return cl.Config.RetryTimes
-	case "music":
-		return cl.Config.Music
-	case "cover":
-		return cl.Config.Cover
-	case "avatar":
-		return cl.Config.Avatar
-	case "json":
-		return cl.Config.JSON
-	case "database":
-		return cl.Config.Database
-	case "database_path":
-		return cl.Config.DatabasePath
-	case "auth":
-		return cl.Config.Auth
-	case "server":
-		return cl.Config.Server
-	case "cookies":
-		return cl.Config.Cookies
-	case "cookie":
-		return cl.Config.Cookie
-	case "video_quality":
-		return cl.Config.VideoQuality
-	default:
-		return nil
-	}
-}
-
 // GetCookies resolves cookies from config (string, map, or auto).
 func (cl *ConfigLoader) GetCookies() map[string]string {
 	// Try cookies map first
@@ -298,39 +258,6 @@ func (cl *ConfigLoader) loadCookieFile(path string) map[string]string {
 		result[k] = fmt.Sprintf("%v", v)
 	}
 	return utils.SanitizeCookies(result)
-}
-
-// GetLinks returns the configured links list.
-func (cl *ConfigLoader) GetLinks() []string {
-	return cl.Config.Link
-}
-
-// Validate checks that essential config fields are set.
-func (cl *ConfigLoader) Validate() bool {
-	if len(cl.Config.Link) == 0 {
-		return false
-	}
-	if cl.Config.Path == "" {
-		return false
-	}
-	return true
-}
-
-// Save persists UI-editable keys back to the config file.
-func (cl *ConfigLoader) Save() bool {
-	if cl.configPath == "" {
-		return false
-	}
-	data, err := yaml.Marshal(cl.Config)
-	if err != nil {
-		slog.Warn("Failed to marshal config", "error", err)
-		return false
-	}
-	if err := os.WriteFile(cl.configPath, data, 0600); err != nil {
-		slog.Warn("Failed to write config", "path", cl.configPath, "error", err)
-		return false
-	}
-	return true
 }
 
 // ConfigDir returns the directory containing the config file.

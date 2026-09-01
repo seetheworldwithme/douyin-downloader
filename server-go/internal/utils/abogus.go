@@ -4,10 +4,7 @@ package utils
 // Ported from Python utils/abogus.py. Uses SM3 hashing (github.com/tjfoc/gmsm/sm3).
 
 import (
-	"crypto/rand"
-	"encoding/binary"
 	"fmt"
-	"math/big"
 	mrand "math/rand"
 	"strings"
 	"time"
@@ -387,11 +384,6 @@ func NewABogus(fp, userAgent string) *ABogus {
 	}
 }
 
-// EncodeData encodes data using the specified alphabet.
-func (a *ABogus) EncodeData(data string, alphabetIndex int) string {
-	return a.crypto.AbogusEncode(data, alphabetIndex)
-}
-
 // GenerateAbogus generates the ABogus signature.
 // Returns (signedParams, abogus, userAgent, body).
 func (a *ABogus) GenerateAbogus(params, body string) (string, string, string, string) {
@@ -531,21 +523,3 @@ func bytesFromInts(arr []int) []byte {
 	}
 	return b
 }
-
-// GenerateABogus is a convenience function.
-func GenerateABogus(params, body, userAgent string) (string, string, string, string) {
-	ab := NewABogus("", userAgent)
-	return ab.GenerateAbogus(params, body)
-}
-
-// Helper to create a random integer in [0, max) using crypto/rand for seeding.
-func cryptoRandInt(max int) int {
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(max)))
-	if err != nil {
-		return mrand.Intn(max)
-	}
-	return int(n.Int64())
-}
-
-// Ensure binary package is used for timestamp encoding.
-var _ = binary.BigEndian

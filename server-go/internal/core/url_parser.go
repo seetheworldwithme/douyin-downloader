@@ -21,10 +21,8 @@ type ParsedURL struct {
 	SecUID      string
 	MixID       string
 	NoteID      string
-	MusicID     string
 	RoomID      string
 	EpisodeID   string
-	ReplayID    string
 }
 
 var (
@@ -33,7 +31,6 @@ var (
 	reUserID     = regexp.MustCompile(`/user/([A-Za-z0-9._-]+)`)
 	reMixID      = regexp.MustCompile(`/(?:collection|mix)/(\d+)`)
 	reNoteID     = regexp.MustCompile(`/(?:note|gallery|slides)/(\d+)`)
-	reMusicID    = regexp.MustCompile(`/music/(\d+)`)
 	reLiveID     = regexp.MustCompile(`/live/(\d+)`)
 	reLiveDomain = regexp.MustCompile(`live\.douyin\.com/(\d+)`)
 )
@@ -68,14 +65,12 @@ func ParseURL(rawURL string) *ParsedURL {
 		if m := reMixID.FindStringSubmatch(rawURL); len(m) > 1 {
 			result.MixID = m[1]
 		}
+	case "music":
+		// ponytail: ID 不再解析 —— 服务器只支持视频/图集,music 链接仅分类后拒绝
 	case "gallery":
 		if m := reNoteID.FindStringSubmatch(rawURL); len(m) > 1 {
 			result.NoteID = m[1]
 			result.AwemeID = m[1]
-		}
-	case "music":
-		if m := reMusicID.FindStringSubmatch(rawURL); len(m) > 1 {
-			result.MusicID = m[1]
 		}
 	case "live":
 		if m := reLiveID.FindStringSubmatch(rawURL); len(m) > 1 {
@@ -99,23 +94,8 @@ func ParseURL(rawURL string) *ParsedURL {
 					result.EpisodeID = m[1]
 				}
 			}
-			if replayIDs := parsed.Query()["replay_id"]; len(replayIDs) > 0 {
-				rid := strings.TrimSpace(replayIDs[0])
-				if rid != "" && isDigits(rid) {
-					result.ReplayID = rid
-				}
-			}
 		}
 	}
 
 	return result
-}
-
-func isDigits(s string) bool {
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return len(s) > 0
 }

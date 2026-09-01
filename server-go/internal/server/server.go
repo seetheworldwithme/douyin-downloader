@@ -22,7 +22,6 @@ import (
 	"github.com/xuziyue/douyin-downloader/internal/auth"
 	"github.com/xuziyue/douyin-downloader/internal/config"
 	"github.com/xuziyue/douyin-downloader/internal/core"
-	"github.com/xuziyue/douyin-downloader/internal/utils"
 )
 
 const tokenTTL = 7 * 24 * time.Hour
@@ -39,8 +38,6 @@ var defaultCORS = []string{
 type ServerDeps struct {
 	Config       *config.ConfigLoader
 	CookieMgr    *auth.CookieManager
-	AuthUsername string
-	AuthPassword string
 	AuthSecret   string
 	AuthAccounts map[string]string
 	CorsOrigins  []string
@@ -111,8 +108,6 @@ func NewServerDeps(cfg *config.ConfigLoader) *ServerDeps {
 	return &ServerDeps{
 		Config:       cfg,
 		CookieMgr:    cookieMgr,
-		AuthUsername: username,
-		AuthPassword: password,
 		AuthSecret:   secret,
 		AuthAccounts: accounts,
 		CorsOrigins:  corsOrigins,
@@ -285,7 +280,6 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 		s.handleResolveError(w, err)
 		return
 	}
-	defer info.APIClient.Close()
 
 	resp := map[string]any{
 		"title":       info.Title,
@@ -328,7 +322,6 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 // streamVideo proxies the upstream no-watermark video without saving to disk.
 func (s *Server) streamVideo(w http.ResponseWriter, r *http.Request, res *resolveResult) {
-	defer res.APIClient.Close()
 	info := res.Video
 
 	// Make upstream request
@@ -376,7 +369,6 @@ func (s *Server) streamVideo(w http.ResponseWriter, r *http.Request, res *resolv
 // directly, the index param streams one specific image, and multiple images
 // without index are packaged into a ZIP on the fly.
 func (s *Server) streamImages(w http.ResponseWriter, r *http.Request, res *resolveResult) {
-	defer res.APIClient.Close()
 	ctx := r.Context()
 
 	if len(res.Images) == 0 {
@@ -473,7 +465,6 @@ var composeSlots = make(chan struct{}, 2)
 // streamImageVideo composes the gallery into an MP4 slideshow (with the post's
 // background music when available) and serves the resulting file.
 func (s *Server) streamImageVideo(w http.ResponseWriter, r *http.Request, res *resolveResult) {
-	defer res.APIClient.Close()
 	ctx := r.Context()
 
 	ffmpegPath, err := core.FindFFmpeg(s.deps.Config.Config.FFmpegPath)
@@ -559,7 +550,6 @@ func (s *Server) resolveMedia(ctx context.Context, rawURL string) (*resolveResul
 
 	info, err := core.ResolveMedia(ctx, rawURL, apiClient, quality)
 	if err != nil {
-		apiClient.Close()
 		return nil, err
 	}
 
@@ -703,9 +693,4 @@ func (s *Server) Run() error {
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.srv.Shutdown(ctx)
-}
-
-func init() {
-	// Ensure utils package is used
-	_ = utils.SanitizeFilename
 }

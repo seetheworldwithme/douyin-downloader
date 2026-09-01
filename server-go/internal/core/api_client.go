@@ -43,19 +43,9 @@ func isLoginRequired(data map[string]any) bool {
 	return code == loginRequiredCode || strings.Contains(msg, "请先登录")
 }
 
-// PagedResponse is the normalized result of paginated API calls.
-type PagedResponse struct {
-	Items     []map[string]any
-	HasMore   bool
-	MaxCursor int64
-	Status    int
-	Raw       map[string]any
-}
-
 // DouyinAPIClient is the HTTP client for Douyin's web API.
 type DouyinAPIClient struct {
 	cookies       map[string]string
-	Proxy         string
 	client        *http.Client
 	headers       map[string]string
 	signer        *utils.XBogus
@@ -85,7 +75,6 @@ func NewDouyinAPIClient(cookies map[string]string, proxy string) *DouyinAPIClien
 
 	return &DouyinAPIClient{
 		cookies: cookies,
-		Proxy:   strings.TrimSpace(proxy),
 		client: &http.Client{
 			Transport: transport,
 			Timeout:   30 * time.Second,
@@ -236,8 +225,7 @@ func (c *DouyinAPIClient) RequestJSON(ctx context.Context, path string, params u
 
 		if resp.StatusCode != 200 {
 			// 403 etc. = WAF/anti-bot rejection; retry after backoff.
-			retriable := resp.StatusCode >= 500 || resp.StatusCode == 429
-			return nil, &httpStatusError{code: resp.StatusCode, retriable: retriable, path: path}
+			return nil, &httpStatusError{code: resp.StatusCode, path: path}
 		}
 
 		body, err := io.ReadAll(resp.Body)
@@ -297,11 +285,10 @@ func (c *DouyinAPIClient) RequestJSON(ctx context.Context, path string, params u
 	return map[string]any{}, lastErr
 }
 
-// httpStatusError carries a non-200 HTTP status, marking whether it is retriable.
+// httpStatusError carries a non-200 HTTP status.
 type httpStatusError struct {
-	code      int
-	retriable bool
-	path      string
+	code int
+	path string
 }
 
 func (e *httpStatusError) Error() string {
@@ -312,49 +299,6 @@ var (
 	errEmpty200 = fmt.Errorf("empty 200 response (anti-bot)")
 	errNonJSON  = fmt.Errorf("non-JSON 200 response (verify page)")
 )
-
-// normalizePagedResponse extracts items, has_more, and cursor from a raw response.
-func normalizePagedResponse(raw map[string]any, itemKeys ...string) *PagedResponse {
-	keys := append([]string{"items"}, append(itemKeys, "aweme_list", "mix_list", "music_list")...)
-	var items []map[string]any
-	for _, key := range keys {
-		if val, ok := raw[key]; ok {
-			if arr, ok := val.([]any); ok {
-				for _, item := range arr {
-					if m, ok := item.(map[string]any); ok {
-						items = append(items, m)
-					}
-				}
-				break
-			}
-		}
-	}
-
-	hasMore := false
-	if hm, ok := raw["has_more"]; ok {
-		switch v := hm.(type) {
-		case bool:
-			hasMore = v
-		case float64:
-			hasMore = int(v) != 0
-		}
-	}
-
-	maxCursor := toInt64(raw["max_cursor"])
-	if maxCursor == 0 {
-		maxCursor = toInt64(raw["cursor"])
-	}
-
-	status, _ := toInt(raw["status_code"])
-
-	return &PagedResponse{
-		Items:     items,
-		HasMore:   hasMore,
-		MaxCursor: maxCursor,
-		Status:    status,
-		Raw:       raw,
-	}
-}
 
 // --- API Methods ---
 
@@ -401,98 +345,6 @@ func (c *DouyinAPIClient) GetVideoDetail(ctx context.Context, awemeID string) (m
 	return nil, fmt.Errorf("响应中无 aweme_detail(视频可能已删除/私密)")
 }
 
-// GetUserPost fetches a page of a user's posted videos.
-func (c *DouyinAPIClient) GetUserPost(ctx context.Context, secUID string, maxCursor int64, count int) (*PagedResponse, error) {
-	if count <= 0 {
-		count = 18
-	}
-	params := c.defaultQuery()
-	params.Set("sec_user_id", secUID)
-	params.Set("max_cursor", fmt.Sprintf("%d", maxCursor))
-	params.Set("count", fmt.Sprintf("%d", count))
-	params.Set("locate_query", "false")
-	params.Set("show_live_replay_strategy", "1")
-	params.Set("need_time_list", "1")
-	params.Set("time_list_query", "0")
-	params.Set("whale_cut_token", "")
-	params.Set("cut_version", "1")
-	params.Set("publish_video_strategy_type", "2")
-
-	raw, err := c.RequestJSON(ctx, "/aweme/v1/web/aweme/post/", params, 3)
-	if err != nil {
-		return nil, err
-	}
-	return normalizePagedResponse(raw, "aweme_list"), nil
-}
-
-// GetUserLike fetches a page of a user's liked videos.
-func (c *DouyinAPIClient) GetUserLike(ctx context.Context, secUID string, maxCursor int64, count int) (*PagedResponse, error) {
-	if count <= 0 {
-		count = 20
-	}
-	params := c.defaultQuery()
-	params.Set("sec_user_id", secUID)
-	params.Set("max_cursor", fmt.Sprintf("%d", maxCursor))
-	params.Set("count", fmt.Sprintf("%d", count))
-	params.Set("locate_query", "false")
-
-	raw, err := c.RequestJSON(ctx, "/aweme/v1/web/aweme/favorite/", params, 3)
-	if err != nil {
-		return nil, err
-	}
-	return normalizePagedResponse(raw, "aweme_list"), nil
-}
-
-// GetUserInfo fetches a user's profile.
-func (c *DouyinAPIClient) GetUserInfo(ctx context.Context, secUID string) (map[string]any, error) {
-	params := c.defaultQuery()
-	params.Set("sec_user_id", secUID)
-
-	data, err := c.RequestJSON(ctx, "/aweme/v1/web/user/profile/other/", params, 3)
-	if err != nil {
-		return nil, err
-	}
-	if user, ok := data["user"].(map[string]any); ok {
-		return user, nil
-	}
-	return nil, nil
-}
-
-// GetMixDetail fetches details for a mix/collection.
-func (c *DouyinAPIClient) GetMixDetail(ctx context.Context, mixID string) (map[string]any, error) {
-	params := c.defaultQuery()
-	params.Set("mix_id", mixID)
-
-	data, err := c.RequestJSON(ctx, "/aweme/v1/web/mix/detail/", params, 3)
-	if err != nil {
-		return nil, err
-	}
-	if info, ok := data["mix_info"].(map[string]any); ok {
-		return info, nil
-	}
-	if detail, ok := data["mix_detail"].(map[string]any); ok {
-		return detail, nil
-	}
-	return data, nil
-}
-
-// GetMixAweme fetches videos in a mix/collection.
-func (c *DouyinAPIClient) GetMixAweme(ctx context.Context, mixID string, cursor int64, count int) (*PagedResponse, error) {
-	if count <= 0 {
-		count = 20
-	}
-	params := c.defaultQuery()
-	params.Set("mix_id", mixID)
-	params.Set("cursor", fmt.Sprintf("%d", cursor))
-	params.Set("count", fmt.Sprintf("%d", count))
-
-	raw, err := c.RequestJSON(ctx, "/aweme/v1/web/mix/aweme/", params, 3)
-	if err != nil {
-		return nil, err
-	}
-	return normalizePagedResponse(raw, "aweme_list"), nil
-}
-
 // ResolveShortURL follows a short URL redirect to get the real URL.
 func (c *DouyinAPIClient) ResolveShortURL(ctx context.Context, shortURL string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", shortURL, nil)
@@ -521,14 +373,6 @@ func (c *DouyinAPIClient) ResolveShortURL(ctx context.Context, shortURL string) 
 	return "", nil
 }
 
-// Close releases any resources (currently a no-op for net/http).
-func (c *DouyinAPIClient) Close() {}
-
-// SignURL signs a raw URL using X-Bogus.
-func (c *DouyinAPIClient) SignURL(rawURL string) (string, string, string) {
-	return c.signer.Build(rawURL)
-}
-
 // UserAgent returns the client's User-Agent string.
 func (c *DouyinAPIClient) UserAgent() string {
 	return c.headers["User-Agent"]
@@ -537,9 +381,4 @@ func (c *DouyinAPIClient) UserAgent() string {
 // Client returns the underlying HTTP client (for streaming).
 func (c *DouyinAPIClient) Client() *http.Client {
 	return c.client
-}
-
-// Cookies returns the current cookies.
-func (c *DouyinAPIClient) Cookies() map[string]string {
-	return c.cookies
 }

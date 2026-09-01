@@ -63,7 +63,7 @@ cd ../server-go && go build -o ../.bin/server ./cmd/server
 | `auth.secret` | token 签名密钥；不填则每次启动随机生成（重启后旧 token 失效） |
 | `server.cors_origins` | 允许的前端来源 |
 
-环境变量覆盖（前缀 `DOUYIN_`）：`DOUYIN_COOKIE`、`DOUYIN_PATH`、`DOUYIN_THREAD`、`DOUYIN_PROXY`。
+环境变量覆盖：`DOUYIN_COOKIE`、`DOUYIN_PROXY`、`DOUYIN_FFMPEG_PATH`。
 
 ## REST API（`/api/v1`）
 

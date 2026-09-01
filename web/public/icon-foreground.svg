@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 512 512">
-  <!-- 安卓自适应图标前景层:透明背景,仅 glyph(缩到 ~62% 居中,留出安全区) -->
-  <g fill="#ffffff" transform="translate(256 256) scale(0.62) translate(-256 -275)">
-    <rect x="222" y="104" width="68" height="156" rx="34"/>
-    <polygon points="256,380 150,250 362,250"/>
-    <rect x="138" y="402" width="236" height="44" rx="22"/>
-  </g>
-</svg>

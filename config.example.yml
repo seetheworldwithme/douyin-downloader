@@ -1,151 +1,46 @@
-link:
-  - https://www.douyin.com/user/MS4wLjABAAAA6O7EZyfDRYXxJrUTpf91K3tmB4rBROkAw-nYMfld8ss
+# 抖音下载器配置模板(复制为 config.yml 使用)
+# 服务端实际只消费以下键;多余的键会被静默忽略。
 
-path: ./Downloaded/
-
-music: true
-cover: true
-avatar: true
-json: true
-
-start_time: ""
-end_time: ""
-
-folderstyle: true
-
-# 文件/目录命名模板。可用变量：
-#   {id} {title} {author} {author_id} {date} {year} {month} {day}
-#   {time} {timestamp} {type} {mode}
-# 要求模板中至少包含 {id} 以避免重名覆盖。
-filename_template: "{date}_{title}_{id}"
-folder_template: "{date}_{title}_{id}"
-
-# 作者目录层命名方式。可选值：
-#   nickname     - 仅作者昵称（默认，最直观，但重名会合并、改名会分裂）
-#   sec_uid      - 作者 sec_uid（稳定唯一，但不直观）
-#   nickname_uid - 昵称_sec_uid（直观 + 唯一，推荐重度用户）
-# 切换只影响后续下载，不会迁移已存在的目录。
-author_dir: "nickname"
-
-# 默认不下载作者主页置顶作品；如需包含置顶，改为 true
-download_pinned: false
-
-mode:
-  - post
-
-number:
-  post: 1
-  like: 0
-  allmix: 0
-  mix: 0
-  music: 0
-  collect: 0
-  collectmix: 0
-
-increase:
-  post: false
-  like: false
-  allmix: false
-  mix: false
-  music: false
-
-thread: 5
-retry_times: 3
+# HTTP 代理(如 "http://127.0.0.1:7890"),留空直连
 proxy: ""
-database: true
-database_path: dy_downloader.db
 
-# 视频下载画质。抖音 API 为每个视频返回多档码率，此选项决定选用哪一档：
-#   highest                  - 最高可用档（默认，与历史行为一致）
-#   lowest                   - 最低可用档（省流量）
+# 视频下载画质。抖音 API 为每个视频返回多档码率,此选项决定选用哪一档:
+#   highest                  - 最高可用档(默认,与历史行为一致)
+#   lowest                   - 最低可用档(省流量)
 #   1440p / 1080p / 720p / 540p / 480p / 360p
-#                            - 指定分辨率，匹配不到时自动降级到最接近的可用档
-# 实际可用档位取决于原视频上传质量。
+#                            - 指定分辨率,匹配不到时自动降级到最接近的可用档
 video_quality: highest
 
-# 图集（/note/ 链接）「合成视频下载」用的 ffmpeg 路径。
-# 留空时自动在 PATH 里找 ffmpeg；找不到则该功能返回错误提示（「下载图片」不受影响）。
-# 服务器上安装：apt install ffmpeg（或对应平台的包管理器）。
-# 也可用环境变量 DOUYIN_FFMPEG_PATH 覆盖。
+# 图集(/note/ 链接)「合成视频下载」用的 ffmpeg 路径。
+# 留空时自动在 PATH 里找 ffmpeg;找不到则该功能返回错误提示(「下载图片」不受影响)。
+# 服务器上安装:apt install ffmpeg。也可用环境变量 DOUYIN_FFMPEG_PATH 覆盖。
 ffmpeg_path: ""
 
-progress:
-  quiet_logs: true
-
-transcript:
-  enabled: false
-  model: gpt-4o-mini-transcribe
-  output_dir: ""
-  response_formats:
-    - txt
-    - json
-  api_url: https://api.openai.com/v1/audio/transcriptions
-  api_key_env: OPENAI_API_KEY
-  api_key: ""
-
-browser_fallback:
-  enabled: true
-  headless: false
-  max_scrolls: 240
-  idle_rounds: 8
-  wait_timeout_seconds: 600
-
-# 评论采集（可选）：启用后每个作品会额外生成 *_comments.json
-comments:
-  enabled: false
-  include_replies: false
-  max_comments: 0   # 0 = 不限
-  page_size: 20
-
-# 直播录制（可选）：当 link 指向 live.douyin.com/{room_id} 或 /follow/live/{room_id} 时生效
-live:
-  max_duration_seconds: 0   # 0 = 录到主播下播
-  chunk_size: 65536
-  idle_timeout_seconds: 30
-
-# 下载完成通知（可选）。providers 支持 bark / telegram / webhook
-notifications:
-  enabled: false
-  on_success: true
-  on_failure: true
-  providers: []
-  # 示例：
-  # providers:
-  #   - type: bark
-  #     url: https://api.day.app/YOUR_DEVICE_KEY
-  #     sound: bell
-  #   - type: telegram
-  #     bot_token: "123456:ABC..."
-  #     chat_id: "987654321"
-  #   - type: webhook
-  #     url: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
-  #     extra_body:
-  #       msgtype: text
-
-# REST API 服务（Go 后端内置，无需额外依赖）
+# REST API 服务
 server:
-  max_jobs: 500
-  job_ttl_seconds: 86400   # 完成态 job 保留 24 小时
   # 跨域允许的来源。自托管前端 / 旧版 WebView APK 时需要。
-  # 留空用默认（含 Vite 开发与常见 WebView 来源）；填 ["*"] 全放开。
+  # 留空用默认(含 Vite 开发与常见 WebView 来源);填 ["*"] 全放开。
   # 原生安卓 App(android-app/)走 OkHttp,不受浏览器 CORS 限制。
   cors_origins: []
 
-# Web 控制台登录凭据（仅 web / sidecar 的 serve 模式生效）
+# Web 控制台登录凭据
 auth:
   username: xuziyue
   password: mmjsxu666555
-  # HMAC 签名密钥。留空会在启动时生成临时密钥（重启后所有 token 失效）。
-  # 生产建议填随机字符串：openssl rand -base64 32
+  # HMAC 签名密钥。留空会在启动时生成临时密钥(重启后所有 token 失效)。
+  # 生产建议填随机字符串:openssl rand -base64 32
   secret: ""
   # 额外账号(可选);所有账号共享同一个 secret
   # users:
   #   - username: alice
   #     password: alice-pwd
 
-cookies:
-  msToken: YOUR_MS_TOKEN
-  ttwid: YOUR_TTWID
-  odin_tt: YOUR_ODIN_TT
-  passport_csrf_token: YOUR_CSRF_TOKEN
-  sid_guard: YOUR_SID_GUARD
+# 抖音登录 Cookie 三种写法任选其一:
+# 1) 键值对:
+# cookies:
+#   ttwid: YOUR_TTWID
+#   odin_tt: YOUR_ODIN_TT
+# 2) 整串字符串:
+# cookie: "ttwid=xxx; odin_tt=yyy"
+# 3) 自动读取 .cookies.json / config/cookies.json:
+# auto_cookie: true

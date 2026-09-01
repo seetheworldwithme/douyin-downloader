@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -22,6 +21,7 @@ type ConfigLoader struct {
 }
 
 // NewConfigLoader creates a loader, reading from the given path if it exists.
+// YAML 缺失键保留默认值,Unmarshal 本身即完成合并。
 func NewConfigLoader(configPath string) (*ConfigLoader, error) {
 	cl := &ConfigLoader{
 		configPath: configPath,
@@ -34,11 +34,9 @@ func NewConfigLoader(configPath string) (*ConfigLoader, error) {
 			if err != nil {
 				return nil, fmt.Errorf("read config %s: %w", configPath, err)
 			}
-			fileConfig := DefaultConfig()
-			if err := yaml.Unmarshal(data, fileConfig); err != nil {
+			if err := yaml.Unmarshal(data, cl.Config); err != nil {
 				return nil, fmt.Errorf("parse YAML %s: %w", configPath, err)
 			}
-			cl.mergeConfig(fileConfig)
 		}
 	}
 
@@ -46,105 +44,9 @@ func NewConfigLoader(configPath string) (*ConfigLoader, error) {
 	return cl, nil
 }
 
-func (cl *ConfigLoader) mergeConfig(fileConfig *Config) {
-	// Simple field-by-field merge: only override if the file provides a non-zero value.
-	// For YAML, missing keys remain as defaults, so we can just use the parsed config
-	// if the file was valid. But to handle partial overrides correctly, we merge
-	// individual non-zero fields.
-
-	cfg := cl.Config
-
-	if fileConfig.Path != "" {
-		cfg.Path = fileConfig.Path
-	}
-	if fileConfig.Music != false || fileConfig.Path != "" {
-		cfg.Music = fileConfig.Music
-		cfg.Cover = fileConfig.Cover
-		cfg.Avatar = fileConfig.Avatar
-		cfg.JSON = fileConfig.JSON
-	}
-	if fileConfig.FilenameTemplate != "" {
-		cfg.FilenameTemplate = fileConfig.FilenameTemplate
-	}
-	if fileConfig.FolderTemplate != "" {
-		cfg.FolderTemplate = fileConfig.FolderTemplate
-	}
-	if fileConfig.AuthorDir != "" {
-		cfg.AuthorDir = fileConfig.AuthorDir
-	}
-	cfg.GroupByMode = fileConfig.GroupByMode
-	cfg.DownloadPinned = fileConfig.DownloadPinned
-
-	if len(fileConfig.Mode) > 0 {
-		cfg.Mode = fileConfig.Mode
-	}
-	if len(fileConfig.Number) > 0 {
-		for k, v := range fileConfig.Number {
-			cfg.Number[k] = v
-		}
-	}
-	if len(fileConfig.Increase) > 0 {
-		for k, v := range fileConfig.Increase {
-			cfg.Increase[k] = v
-		}
-	}
-	if fileConfig.Thread > 0 {
-		cfg.Thread = fileConfig.Thread
-	}
-	if fileConfig.RetryTimes > 0 {
-		cfg.RetryTimes = fileConfig.RetryTimes
-	}
-	if fileConfig.RateLimit > 0 {
-		cfg.RateLimit = fileConfig.RateLimit
-	}
-	if fileConfig.Proxy != "" {
-		cfg.Proxy = fileConfig.Proxy
-	}
-	if fileConfig.VideoQuality != "" {
-		cfg.VideoQuality = fileConfig.VideoQuality
-	}
-	if fileConfig.FFmpegPath != "" {
-		cfg.FFmpegPath = fileConfig.FFmpegPath
-	}
-	cfg.Database = fileConfig.Database
-	if fileConfig.DatabasePath != "" {
-		cfg.DatabasePath = fileConfig.DatabasePath
-	}
-
-	// Complex fields: override if the file has non-default values
-	if fileConfig.Transcript.Model != "" {
-		cfg.Transcript = fileConfig.Transcript
-	}
-	if fileConfig.Auth.Username != "" || len(fileConfig.Auth.Users) > 0 {
-		cfg.Auth = fileConfig.Auth
-	}
-	if fileConfig.Server.MaxJobs != 0 {
-		cfg.Server = fileConfig.Server
-	}
-
-	cfg.Cookies = fileConfig.Cookies
-	cfg.Cookie = fileConfig.Cookie
-	cfg.AutoCookie = fileConfig.AutoCookie
-
-	if len(fileConfig.Link) > 0 {
-		cfg.Link = fileConfig.Link
-	}
-
-	cfg.StartTime = fileConfig.StartTime
-	cfg.EndTime = fileConfig.EndTime
-}
-
 func (cl *ConfigLoader) applyEnvOverrides() {
 	if v := os.Getenv("DOUYIN_COOKIE"); v != "" {
 		cl.Config.Cookie = v
-	}
-	if v := os.Getenv("DOUYIN_PATH"); v != "" {
-		cl.Config.Path = v
-	}
-	if v := os.Getenv("DOUYIN_THREAD"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cl.Config.Thread = n
-		}
 	}
 	if v := os.Getenv("DOUYIN_PROXY"); v != "" {
 		cl.Config.Proxy = v

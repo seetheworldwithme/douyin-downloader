@@ -63,7 +63,7 @@ Copy `config.example.yml` to `config.yml` and fill it in. Key fields:
 | `auth.secret` | token signing secret; if empty, a random one is generated per start (old tokens invalidated on restart) |
 | `server.cors_origins` | allowed frontend origins |
 
-Env overrides (prefix `DOUYIN_`): `DOUYIN_COOKIE`, `DOUYIN_PATH`, `DOUYIN_THREAD`, `DOUYIN_PROXY`.
+Env overrides: `DOUYIN_COOKIE`, `DOUYIN_PROXY`, `DOUYIN_FFMPEG_PATH`.
 
 ## REST API (`/api/v1`)
 

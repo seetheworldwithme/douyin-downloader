@@ -323,6 +323,14 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 func (s *Server) streamVideo(w http.ResponseWriter, r *http.Request, res *resolveResult) {
 	info := res.Video
 
+	// redirect=1:302 让客户端直连抖音 CDN。国内直连实测 ~1.2MB/s,经海外 VPS
+	// 中转 ~320KB/s 且链路间歇性被阻断;直链不绑 IP、不校验 UA/Referer。
+	// web 端靠服务端 Content-Disposition 定文件名,继续走中转(默认)。
+	if r.URL.Query().Get("redirect") == "1" {
+		http.Redirect(w, r, info.VideoURL, http.StatusFound)
+		return
+	}
+
 	// Make upstream request
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), "GET", info.VideoURL, nil)
 	if err != nil {

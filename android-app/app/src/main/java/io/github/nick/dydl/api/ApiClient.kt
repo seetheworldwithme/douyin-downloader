@@ -115,6 +115,8 @@ object ApiClient {
             .append("&token=").append(java.net.URLEncoder.encode(token, "UTF-8"))
         if (mode != null) sb.append("&mode=").append(mode)
         if (index != null) sb.append("&index=").append(index)
+        // 合成视频(mode=video)需服务端 ffmpeg,必须中转;其余 302 直连抖音 CDN(快 3 倍+)
+        if (mode != "video") sb.append("&redirect=1")
         return sb.toString()
     }
 }

@@ -84,6 +84,9 @@ func NewDouyinAPIClient(cookies map[string]string, proxy string) *DouyinAPIClien
 			"Referer":         "https://www.douyin.com/?recommend=1",
 			"Accept":          "*/*",
 			"Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+			// ponytail: Argus 网关(2026-11 起)对 /aweme/ 接口前置校验此头,
+			// 目前不校验取值;若哪天开始校验,需逆向真实 argus token 生成。
+			"x-tt-argus": "1",
 		},
 		signer:        utils.NewXBogus(ua),
 		abogusEnabled: true,
@@ -152,7 +155,18 @@ func (c *DouyinAPIClient) defaultQuery() url.Values {
 		"round_trip_time":      {"200"},
 		"support_h265":         {"1"},
 		"support_dash":         {"1"},
-		"uifid":                {""},
+	}
+	// Argus 网关(2026-11 起)要求 uifid 与 verifyFp/fp 取自 cookie 同源值
+	// (UIFID/UIFID_TEMP、s_v_web_id),缺失或自造值会被 403
+	// ("Uifid Not Found"/"Signature Not Found")。
+	uifid := c.cookies["UIFID"]
+	if uifid == "" {
+		uifid = c.cookies["UIFID_TEMP"]
+	}
+	params.Set("uifid", uifid)
+	if sv := c.cookies["s_v_web_id"]; sv != "" {
+		params.Set("verifyFp", sv)
+		params.Set("fp", sv)
 	}
 	// msToken is intentionally omitted: a stale persisted token triggers
 	// Douyin's WAF (403), and these endpoints succeed without it.
@@ -184,26 +198,19 @@ func (c *DouyinAPIClient) buildAbogusURL(baseURLStr, query string) (string, stri
 	return baseURLStr + "?" + signedParams, ua
 }
 
-// RequestJSON performs an UNSIGNED GET and returns the parsed JSON, retrying a
-// few times with backoff. Douyin rotates its signing algorithm; the reverse-
-// engineered signers (a_bogus / X-Bogus) here fall out of sync and their
-// signatures get rejected by Douyin's WAF (HTTP 403 / verify page). An unsigned
-// request with a valid cookie still succeeds for these read endpoints, so
-// signing is intentionally omitted (see doGet).
+// RequestJSON performs a signed GET and returns the parsed JSON, retrying a
+// few times with backoff. 抖音 Argus 网关(2026-11 起)对 /aweme/ 接口要求
+// x-tt-argus 头 + a_bogus 签名 + cookie 同源的 uifid/verifyFp 成套出现,
+// 缺失即 403;仓库内置 a_bogus/X-Bogus 签名器配合同源参数实测仍有效(doGet)。
 func (c *DouyinAPIClient) RequestJSON(ctx context.Context, path string, params url.Values, maxRetries int) (map[string]any, error) {
 	if maxRetries <= 0 {
 		maxRetries = 3
 	}
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 5 * time.Second}
-	baseURLStr := baseURL + path
 
-	// doGet issues one UNSIGNED GET. Signing (a_bogus / X-Bogus) is intentionally
-	// disabled here: the reverse-engineered signers produce signatures Douyin's
-	// WAF now rejects (a single bad signature triggers a verify page), while an
-	// unsigned request with a valid cookie succeeds for these read endpoints.
+	// doGet issues one signed GET(签名 UA 必须与请求 UA 一致)。
 	doGet := func() (map[string]any, error) {
-		fullURL := baseURLStr + "?" + params.Encode()
-		ua := c.headers["User-Agent"]
+		fullURL, signedUA := c.BuildSignedPath(path, params)
 
 		req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
 		if err != nil {
@@ -212,7 +219,7 @@ func (c *DouyinAPIClient) RequestJSON(ctx context.Context, path string, params u
 		for k, v := range c.headers {
 			req.Header.Set(k, v)
 		}
-		req.Header.Set("User-Agent", ua)
+		req.Header.Set("User-Agent", signedUA)
 		for k, v := range c.cookies {
 			req.AddCookie(&http.Cookie{Name: k, Value: v})
 		}

@@ -7,7 +7,8 @@
 - **后端**:Go 服务在 `server-go/`(module `github.com/xuziyue/douyin-downloader`)。
   入口 `server-go/cmd/server/main.go`;REST API 在 `server-go/internal/server/`。
 - **前端**:Vue 3 + Element Plus + Vite PWA 在 `web/`,构建产物输出到
-  `server-go/static/`(由 Go 服务的 SPA 回退和 `docker/` 里的 nginx 容器托管)。
+  `server-go/static/`(由 Go 服务的 SPA 回退和宿主机 nginx 托管,
+  站点配置 `nginx/douyin.xuziyue.work.conf`)。
 - **安卓**:Kotlin + Compose 原生应用在 `android-app/`(独立于 web 前端,调用
   同一套 REST API),打包脚本 `build-android-app.sh`(Windows Git Bash),产物
   `release/apk/douyin-downloader.apk`,详见 `docs/APK.md`。
@@ -32,7 +33,7 @@ cd web && npm run build        # 产物 → server-go/static/,PWA 构建需 Node
 bash build-android-app.sh      # debug 包;release 需 BUILD_VARIANT=release
 
 # 部署:在服务器上从仓库根目录一键执行
-bash start.sh                  # 重建前端 → 重编 Go → 重启进程 → 重启 nginx 容器
+bash start.sh                  # 重建前端 → 重编 Go → 重启进程(nginx 为宿主机系统服务,本脚本不管)
 ```
 
 ## Skills

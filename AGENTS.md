@@ -12,10 +12,10 @@
 | Go 后端 | `server-go/` | module `github.com/xuziyue/douyin-downloader` |
 | 前端 | `web/` | Vue 3 + Vite + vite-plugin-pwa;构建产物 → `../server-go/static` |
 | 安卓端 | `android-app/` | Kotlin + Jetpack Compose 原生应用(独立于 web),调用同一套 REST API |
-| 构建产物 | `server-go/static/` | 由 Go 服务 SPA 回退和 nginx 容器共同托管 |
+| 构建产物 | `server-go/static/` | 由 Go 服务 SPA 回退和宿主机 nginx 共同托管 |
 | 配置 | `config.yml`、`config.example.yml` | YAML 配置 |
 | Cookies | `.cookies.json`、`config/cookies.json` | 运行时敏感数据(gitignore) |
-| 部署 | `docker/` | edge-nginx TLS + nginx 静态容器 + 宿主机 Go 进程 |
+| 部署 | `nginx/` | 宿主机 nginx：TLS 终结 + 静态托管 + `/api/` 反代 |
 | 安卓文档 | `docs/APK.md` | APK 构建/安装说明 |
 
 ### Go 包结构(`server-go/internal/`)
@@ -58,8 +58,9 @@
 
 ### 部署
 - 在服务器上从仓库根目录一键执行:`bash start.sh`(直接在服务器上运行,无 SSH 包装)。
-- `start.sh` 重建前端 → 重编 Go 二进制 → 重启进程 → 重启 nginx 容器。
-- edge-nginx 终结 TLS;`/` → nginx 静态(8083),`/api/` → Go 服务(8000)。
+- `start.sh` 重建前端 → 重编 Go 二进制 → 重启进程(nginx 是宿主机系统服务,不在脚本管理范围)。
+- 宿主机 nginx 终结 TLS;`/` → 静态(`server-go/static`),`/api/` → Go 服务(8000)。
+  站点配置 `nginx/douyin.xuziyue.work.conf`。
 
 ### 注意事项
 - 后端只实现「单条链接解析 + 流式下载」流程(视频 + 图集)。用户主页 / 点赞 /

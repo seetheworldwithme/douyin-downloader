@@ -45,3 +45,4 @@ release/
 # Android release signing keys (never commit)
 *.keystore
 *.jks
+.backend.pid

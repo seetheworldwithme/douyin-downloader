@@ -2,9 +2,9 @@
 # 一键启动抖音下载器(在服务器上直接执行:`bash start.sh`):
 #   1) npm run build 打包前端 → server-go/static
 #   2) 编译 Go 后端(server-go)并在宿主机后台启动,监听 127.0.0.1:8000
-#   3) docker compose 启动官方 nginx 镜像(127.0.0.1:8083,纯静态托管前端)
-# 对外 HTTPS 由 edge-nginx 负责(见 docker/edge-proxy/douyin.xuziyue.work.conf)。
-# 访问:https://douyin.xuziyue.work/  (/ → nginx 前端,/api/ → Go 后端)
+# 对外由宿主机 nginx 直接托管:/(静态,直接读 server-go/static)+ /api/(反代 8000),
+# 站点配置见 nginx/douyin.xuziyue.work.conf(改配置后 sudo systemctl reload nginx)。
+# 访问:https://douyin.xuziyue.work/
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,7 +13,7 @@ cd "$REPO_DIR"
 SERVE_PORT="${SERVE_PORT:-8000}"
 GO_VERSION_MIN="1.26"  # go.mod 要求 go 1.26.4
 
-echo "== [1/3] 构建前端 (npm run build) =="
+echo "== [1/2] 构建前端 (npm run build) =="
 # PWA 的 service worker 压缩需要 Node 20+(全局 crypto);非交互 shell 不会自动激活 nvm,
 # 这里显式 source nvm 并切到 LTS。无 nvm 则回退系统 node(若 <20 会构建失败)。
 export NVM_DIR="$HOME/.nvm"
@@ -40,7 +40,7 @@ npm run build
 cd "$REPO_DIR"
 echo "  前端产物: $REPO_DIR/server-go/static"
 
-echo "== [2/3] 编译并启动 Go 后端 (127.0.0.1:$SERVE_PORT) =="
+echo "== [2/2] 编译并启动 Go 后端 (127.0.0.1:$SERVE_PORT) =="
 if [[ -f .backend.pid ]] && kill -0 "$(cat .backend.pid)" 2>/dev/null; then
   echo "  停止旧后端 PID $(cat .backend.pid)"
   kill "$(cat .backend.pid)" || true
@@ -72,7 +72,7 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
   echo "  ⚠ 未找到 ffmpeg:图集「合成视频下载」将不可用。安装:apt install ffmpeg"
 fi
 
-# 仅绑 loopback:edge-nginx(host 网络)可达,公网不可达
+# 仅绑 loopback:宿主机 nginx 可达,公网不可达
 mkdir -p logs
 nohup ./.bin/douyin-server -config config.yml -host 127.0.0.1 -port "$SERVE_PORT" \
   > logs/backend.log 2>&1 &
@@ -80,18 +80,9 @@ echo $! > .backend.pid
 disown 2>/dev/null || true
 echo "  后端 PID $(cat .backend.pid) (日志: logs/backend.log)"
 
-echo "== [3/3] 启动前端 nginx 容器 (127.0.0.1:8083) =="
-# 兼容 v2 插件(docker compose)与 v1(docker-compose)。
-# 显式 -p douyin:docker-compose v1 默认用 compose 文件所在目录名(docker)做项目名,
-# 会和其它同样放在 docker/ 子目录的服务(如 calendar-site)撞项目、误删/重建对方容器。
-if docker compose version >/dev/null 2>&1; then COMPOSE=(docker compose)
-elif command -v docker-compose >/dev/null 2>&1; then COMPOSE=(docker-compose)
-else echo "  找不到 docker compose(v2 插件或 v1 docker-compose)"; exit 1; fi
-"${COMPOSE[@]}" -p douyin -f docker/docker-compose.yml up -d
-
 echo
 echo "✓ 启动完成。"
-echo "  - 前端容器: douyin-web @ 127.0.0.1:8083"
+echo "  - 前端静态: $REPO_DIR/server-go/static(宿主机 nginx 直接托管)"
 echo "  - 后端 API: 127.0.0.1:$SERVE_PORT (日志: logs/backend.log)"
-echo "  - 对外(经 edge-nginx): https://douyin.xuziyue.work/"
-echo "  - 停止: ${COMPOSE[*]} -p douyin -f docker/docker-compose.yml down ; kill \$(cat .backend.pid)"
+echo "  - 对外: https://douyin.xuziyue.work/  (nginx 站点: nginx/douyin.xuziyue.work.conf)"
+echo "  - 停止后端: kill \$(cat .backend.pid)"

@@ -20,9 +20,9 @@ The frontend is an installable PWA; a native Android app (Kotlin + Jetpack Compo
 | Backend | Go (`net/http`, no CGO) | `server-go/` |
 | Frontend | Vue 3 + Vite + vite-plugin-pwa | `web/` |
 | Android | Kotlin + Jetpack Compose (native) | `android-app/` |
-| Build output | static files, served by the Go SPA fallback and the nginx container | `server-go/static/` |
+| Build output | static files, served by the Go SPA fallback and host nginx | `server-go/static/` |
 | Config | YAML (`config.yml`) | repo root |
-| Deploy | edge-nginx (TLS) + nginx static container + host Go process | `docker/` |
+| Deploy | host nginx (TLS + static + `/api/` proxy) + host Go process | `nginx/` |
 
 ## Quick start
 
@@ -82,9 +82,7 @@ On the server (where the repo is cloned), from the repo root:
 bash start.sh
 ```
 
-`start.sh` runs **on the server directly** (no SSH wrapper). It will: ① build the frontend → `server-go/static`; ② compile and start the Go backend in the background (`127.0.0.1:8000`); ③ start the nginx static container (`127.0.0.1:8083`). Public HTTPS is terminated by edge-nginx: `/` → nginx, `/api/` → Go backend. Edge-nginx is a separate repo and is not managed by this script.
-
-See [`docker/README.md`](docker/README.md) for details.
+`start.sh` runs **on the server directly** (no SSH wrapper). It will: ① build the frontend → `server-go/static`; ② compile and start the Go backend in the background (`127.0.0.1:8000`). Host nginx (a system service, not managed by this script) serves the site: `/` → static files, `/api/` → Go backend, with TLS via Let's Encrypt. Site config: [`nginx/douyin.xuziyue.work.conf`](nginx/douyin.xuziyue.work.conf).
 
 ## Project layout
 
@@ -92,8 +90,8 @@ See [`docker/README.md`](docker/README.md) for details.
 server-go/          Go backend (cmd/server + internal/{auth,config,core,server,utils})
 web/                Vue frontend (builds to server-go/static)
 server-go/static/      frontend build output (Go SPA fallback + nginx)
-start.sh            one-command server bring-up (frontend build + Go backend + nginx container)
-docker/             nginx / edge-proxy config (no deploy scripts — use root start.sh)
+start.sh            one-command server bring-up (frontend build + Go backend)
+nginx/              host nginx site config (douyin.xuziyue.work)
 config.yml          runtime config (gitignored)
 config.example.yml  config template
 .cookies.json       cookie credentials (gitignored)

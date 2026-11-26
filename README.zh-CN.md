@@ -20,9 +20,9 @@
 | 后端 | Go（`net/http`，无需 CGO） | `server-go/` |
 | 前端 | Vue 3 + Vite + vite-plugin-pwa | `web/` |
 | 安卓 | Kotlin + Jetpack Compose（原生） | `android-app/` |
-| 前端构建产物 | 静态文件，由 Go 服务 SPA 兜底托管，也由 nginx 容器托管 | `server-go/static/` |
+| 前端构建产物 | 静态文件，由 Go 服务 SPA 兜底和宿主机 nginx 托管 | `server-go/static/` |
 | 配置 | YAML（`config.yml`） | 仓库根 |
-| 部署 | edge-nginx（TLS 终结）+ nginx 静态容器 + 宿主机 Go 进程 | `docker/` |
+| 部署 | 宿主机 nginx（TLS 终结 + 静态 + `/api/` 反代）+ 宿主机 Go 进程 | `nginx/` |
 
 ## 快速开始
 
@@ -82,9 +82,7 @@ cd ../server-go && go build -o ../.bin/server ./cmd/server
 bash start.sh
 ```
 
-`start.sh` **直接在服务器上运行**（无 SSH 包装），会：① 构建前端 → `server-go/static`；② 编译并后台启动 Go 后端（`127.0.0.1:8000`）；③ 启动 nginx 静态容器（`127.0.0.1:8083`）。对外 HTTPS 由 edge-nginx 终结：`/` → nginx，`/api/` → Go 后端。edge-nginx 是独立仓库，本脚本不管理。
-
-详见 [`docker/README.md`](docker/README.md)。
+`start.sh` **直接在服务器上运行**（无 SSH 包装），会：① 构建前端 → `server-go/static`；② 编译并后台启动 Go 后端（`127.0.0.1:8000`）。对外由宿主机 nginx（系统服务，本脚本不管理）直接托管：`/` → 静态文件，`/api/` → Go 后端，TLS 用 Let's Encrypt 证书。站点配置：[`nginx/douyin.xuziyue.work.conf`](nginx/douyin.xuziyue.work.conf)。
 
 ## 项目结构
 
@@ -92,8 +90,8 @@ bash start.sh
 server-go/          Go 后端（cmd/server + internal/{auth,config,core,server,utils}）
 web/                Vue 前端（构建到 server-go/static）
 server-go/static/      前端构建产物（Go SPA 兜底 + nginx 托管）
-start.sh            服务器一键启动（构建前端 + Go 后端 + nginx 容器）
-docker/             nginx / edge-proxy 配置（无部署脚本，用根 start.sh）
+start.sh            服务器一键启动（构建前端 + Go 后端）
+nginx/              宿主机 nginx 站点配置（douyin.xuziyue.work）
 config.yml          运行配置（gitignored）
 config.example.yml  配置模板
 .cookies.json       Cookie 凭据（gitignored）
